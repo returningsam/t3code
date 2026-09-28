@@ -46,6 +46,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import { resolveWtLayout } from "./wtLayout.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -1104,8 +1105,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     });
   });
 
-  // The wt layout keeps the main checkout at <container>/main and worktrees
-  // under <container>/worktrees. Returns the container, or null for any other layout.
+  // Returns the wt layout container (see wtLayout.ts), or null for any other layout.
   const resolveWtLayoutContainer = Effect.fn("resolveWtLayoutContainer")(function* (cwd: string) {
     const commonDir = yield* runGitStdout("GitVcsDriver.resolveWtLayoutContainer", cwd, [
       "rev-parse",
@@ -1116,8 +1116,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       Effect.orElseSucceed(() => ""),
     );
     if (path.basename(commonDir) !== ".git") return null;
-    const root = path.dirname(commonDir);
-    return path.basename(root) === "main" ? path.dirname(root) : null;
+    const layout = yield* resolveWtLayout(fileSystem, path, path.dirname(commonDir));
+    return layout?.container ?? null;
   });
 
   // Point <branch> at wt/<branch> so `git pull` in main/ picks up the worktree's commits.

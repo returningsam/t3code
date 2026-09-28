@@ -21,6 +21,7 @@ import {
 } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import { resolveWtLayout } from "../vcs/wtLayout.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 
 export const canonicalizeClientCommandTimestamps = (
@@ -111,12 +112,22 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
         );
 
     if (canonicalCommand.type === "project.create") {
+      const workspaceRoot = yield* normalizeProjectWorkspaceRootForCreate(
+        canonicalCommand.workspaceRoot,
+        canonicalCommand.createWorkspaceRootIfMissing,
+      );
+      // Clients title a new project after its folder, which in the wt layout is `main`.
+      // Only that inferred title gives way to the layout's name; a typed title stays.
+      const isInferredTitle =
+        canonicalCommand.title === path.basename(canonicalCommand.workspaceRoot) ||
+        canonicalCommand.title === path.basename(workspaceRoot);
+      const wtLayout = isInferredTitle
+        ? yield* resolveWtLayout(fileSystem, path, workspaceRoot)
+        : null;
       return {
         ...canonicalCommand,
-        workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
-          canonicalCommand.workspaceRoot,
-          canonicalCommand.createWorkspaceRootIfMissing,
-        ),
+        ...(wtLayout?.name ? { title: wtLayout.name } : {}),
+        workspaceRoot,
         createWorkspaceRootIfMissing: canonicalCommand.createWorkspaceRootIfMissing === true,
       } satisfies OrchestrationCommand;
     }

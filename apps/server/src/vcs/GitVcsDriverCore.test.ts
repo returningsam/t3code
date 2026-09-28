@@ -2635,12 +2635,34 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("follows the wt layout for repos checked out at <container>/main", () =>
+    it.effect("keeps a main checkout without a .wt marker on the default worktree path", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-unmarked-"));
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          path: null,
+          refName: initialBranch,
+          newRefName: "wt/0a1b2c3d",
+        });
+        assert.isFalse(created.worktree.path.startsWith(pathService.join(container, "worktrees")));
+        yield* driver.removeWorktree({ cwd, path: created.worktree.path, force: true });
+      }),
+    );
+
+    it.effect("follows the wt layout for repos marked with <container>/.wt", () =>
       Effect.gen(function* () {
         const pathService = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
         // Git reports the common dir with symlinks resolved (/var -> /private/var on macOS).
         const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        yield* writeTextFile(container, ".wt", "[wt]\n\tname = demo\n");
         const cwd = pathService.join(container, "main");
         yield* fileSystem.makeDirectory(cwd);
         const { initialBranch } = yield* initRepoWithCommit(cwd);
