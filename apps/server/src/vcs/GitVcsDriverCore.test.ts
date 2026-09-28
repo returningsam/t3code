@@ -2635,6 +2635,52 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("follows the wt layout for repos checked out at <container>/main", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        // Git reports the common dir with symlinks resolved (/var -> /private/var on macOS).
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const remote = yield* makeTmpDir("git-remote-");
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          path: null,
+          refName: initialBranch,
+          newRefName: "wt/0a1b2c3d",
+        });
+        const worktreePath = pathService.join(container, "worktrees", "wt-0a1b2c3d");
+        assert.equal(created.worktree.path, worktreePath);
+        // Temporary branches get no tracking branch until they're renamed.
+        assert.equal(yield* git(cwd, ["branch", "--list", "0a1b2c3d"]), "");
+
+        yield* driver.renameBranch({
+          cwd: worktreePath,
+          oldBranch: "wt/0a1b2c3d",
+          newBranch: "wt/fix-login",
+        });
+        assert.equal(
+          yield* git(cwd, ["rev-parse", "--abbrev-ref", "fix-login@{upstream}"]),
+          "wt/fix-login",
+        );
+
+        yield* writeTextFile(worktreePath, "fix.txt", "fix\n");
+        yield* driver.prepareCommitContext(worktreePath);
+        yield* driver.commit(worktreePath, "Fix login", "");
+        yield* driver.pushCurrentBranch(worktreePath, null);
+        assert.equal(
+          yield* git(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
+          "origin/fix-login",
+        );
+      }),
+    );
+
     it.effect("allows worktree removal to run longer than the default command timeout", () =>
       Effect.gen(function* () {
         const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
