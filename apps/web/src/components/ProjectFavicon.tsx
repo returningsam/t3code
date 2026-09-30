@@ -144,6 +144,35 @@ function ProjectFaviconFallback({
   return <Icon className={cn("size-3.5 shrink-0 text-icon-muted", className)} />;
 }
 
+const DARK_SAMPLE_SIZE = 16;
+
+/** True when at least 80% of the image's opaque pixels are near black. */
+function isMostlyDarkImage(image: HTMLImageElement): boolean {
+  const canvas = document.createElement("canvas");
+  canvas.width = DARK_SAMPLE_SIZE;
+  canvas.height = DARK_SAMPLE_SIZE;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return false;
+  context.drawImage(image, 0, 0, DARK_SAMPLE_SIZE, DARK_SAMPLE_SIZE);
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, DARK_SAMPLE_SIZE, DARK_SAMPLE_SIZE).data;
+  } catch {
+    // Cross-origin images taint the canvas.
+    return false;
+  }
+  let opaque = 0;
+  let dark = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (pixels[index + 3]! < 128) continue;
+    opaque += 1;
+    const luminance =
+      (0.2126 * pixels[index]! + 0.7152 * pixels[index + 1]! + 0.0722 * pixels[index + 2]!) / 255;
+    if (luminance < 0.2) dark += 1;
+  }
+  return opaque > 0 && dark / opaque >= 0.8;
+}
+
 function ProjectFaviconImage({
   src,
   className,
@@ -158,6 +187,7 @@ function ProjectFaviconImage({
   const [displayedSrc, setDisplayedSrc] = useState<string | null>(() =>
     src.startsWith("data:image/") ? src : null,
   );
+  const [darkSrc, setDarkSrc] = useState<string | null>(null);
   const isLoading = displayedSrc !== src;
   const handleLoadError = (failedSrc: string) => {
     setDisplayedSrc((currentSrc) => (currentSrc === failedSrc ? null : currentSrc));
@@ -176,11 +206,11 @@ function ProjectFaviconImage({
         <img
           src={displayedSrc}
           alt=""
-          className={cn(
-            // Keeps dark-on-transparent favicons visible against the dark sidebar.
-            "size-3.5 shrink-0 rounded-[25%] object-contain dark:drop-shadow-[0_0_1px_rgb(255_255_255/0.7)]",
-            className,
-          )}
+          className={cn("size-3.5 shrink-0 rounded-[25%] object-contain", className)}
+          data-dark-favicon={darkSrc === displayedSrc ? "" : undefined}
+          onLoad={(event) => {
+            setDarkSrc(isMostlyDarkImage(event.currentTarget) ? displayedSrc : null);
+          }}
           onError={() => handleLoadError(displayedSrc)}
         />
       ) : null}

@@ -4482,6 +4482,7 @@ export default function Sidebar() {
                             ? `Filter threads by project: ${scopedProjectGroup.displayName}`
                             : "Filter threads by project"
                         }
+                        variant="favicon"
                       />
                     }
                   >
