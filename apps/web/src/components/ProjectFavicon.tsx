@@ -176,7 +176,11 @@ function ProjectFaviconImage({
         <img
           src={displayedSrc}
           alt=""
-          className={cn("size-3.5 shrink-0 rounded-[25%] object-contain", className)}
+          className={cn(
+            // Keeps dark-on-transparent favicons visible against the dark sidebar.
+            "size-3.5 shrink-0 rounded-[25%] object-contain dark:drop-shadow-[0_0_1px_rgb(255_255_255/0.7)]",
+            className,
+          )}
           onError={() => handleLoadError(displayedSrc)}
         />
       ) : null}
