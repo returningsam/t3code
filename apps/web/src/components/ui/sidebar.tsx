@@ -676,9 +676,10 @@ const sidebarMenuButtonVariants = cva(
       variant: {
         default: "font-medium text-sidebar-muted-foreground/80",
         outline: "bg-sidebar-control-surface ring-1 ring-sidebar-border",
-        // Puts a light tile behind a dark favicon (see ProjectFavicon) in dark mode.
+        // Tiles the whole button behind a dark favicon (see ProjectFavicon) in dark
+        // mode, and clears the favicon's own tile so it doesn't show on hover.
         favicon:
-          "font-medium text-sidebar-muted-foreground/80 dark:has-[[data-dark-favicon]]:bg-foreground/60 dark:has-[[data-dark-favicon]]:ring-1 dark:has-[[data-dark-favicon]]:ring-sidebar-border dark:has-[[data-dark-favicon]]:hover:bg-foreground/75",
+          "font-medium text-sidebar-muted-foreground/80 [--favicon-tile:transparent] dark:has-[[data-dark-favicon]]:bg-(--sidebar-icon-color) dark:has-[[data-dark-favicon]]:ring-1 dark:has-[[data-dark-favicon]]:ring-sidebar-border dark:has-[[data-dark-favicon]]:hover:bg-sidebar-foreground",
       },
     },
   },

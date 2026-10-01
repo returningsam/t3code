@@ -206,7 +206,10 @@ function ProjectFaviconImage({
         <img
           src={displayedSrc}
           alt=""
-          className={cn("size-3.5 shrink-0 rounded-[25%] object-contain", className)}
+          className={cn(
+            "size-3.5 shrink-0 rounded-[25%] object-contain dark:data-dark-favicon:bg-(--favicon-tile,var(--sidebar-icon-color)) dark:data-dark-favicon:p-px",
+            className,
+          )}
           data-dark-favicon={darkSrc === displayedSrc ? "" : undefined}
           onLoad={(event) => {
             setDarkSrc(isMostlyDarkImage(event.currentTarget) ? displayedSrc : null);
