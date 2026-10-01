@@ -235,6 +235,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
   const tokenStart = tokenStartForCursor(text, cursor);
   const token = text.slice(tokenStart, cursor);
+  // A second slash means a path like /Users/me, not a command.
+  const inlineSlashMatch = /^\/([^\s/]*)$/.exec(token);
+  if (inlineSlashMatch) {
+    return {
+      kind: "slash-command",
+      query: inlineSlashMatch[1] ?? "",
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+    };
+  }
   const pullRequestMatch = /^#([\p{L}\p{N}][\p{L}\p{N}_-]*)?$/u.exec(token);
   if (pullRequestMatch) {
     return {
