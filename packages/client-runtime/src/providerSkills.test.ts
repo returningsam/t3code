@@ -43,12 +43,12 @@ describe("formatProviderSkillDisplayName", () => {
     ).toBe("Review Follow-up");
   });
 
-  it("falls back to a title-cased skill name", () => {
+  it("falls back to the skill name as written", () => {
     expect(
       formatProviderSkillDisplayName({
-        name: "review-follow-up",
+        name: "wt:review-follow_up",
       }),
-    ).toBe("Review Follow Up");
+    ).toBe("wt:review-follow_up");
   });
 });
 
