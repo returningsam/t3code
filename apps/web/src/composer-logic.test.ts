@@ -232,6 +232,33 @@ describe("detectComposerTrigger", () => {
     });
   });
 
+  it("detects a slash command trigger after other text", () => {
+    const text = "Please run /gh-fi";
+
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-command",
+      query: "gh-fi",
+      rangeStart: "Please run ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("opens the slash menu from a bare slash after other text", () => {
+    const text = "Please run /";
+
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-command",
+      query: "",
+      rangeStart: "Please run ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("does not treat paths or embedded slashes as slash commands", () => {
+    expect(detectComposerTrigger("Look in /Users/me", "Look in /Users/me".length)).toBeNull();
+    expect(detectComposerTrigger("and/or", "and/or".length)).toBeNull();
+  });
+
   it.each(["$", "€", "£", "¥", "₹", "₩", "₿", "𑿝"])(
     "detects %sskill trigger at cursor",
     (prefix) => {
