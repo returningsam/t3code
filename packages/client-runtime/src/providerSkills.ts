@@ -6,15 +6,6 @@ import type {
 
 export type ProviderSkillSourceKind = "app" | "repo" | "project" | "personal" | "system" | "other";
 
-function titleCaseWords(value: string): string {
-  const words: string[] = [];
-  for (const segment of value.split(/[\s:_-]+/)) {
-    if (segment.length === 0) continue;
-    words.push(segment.charAt(0).toUpperCase() + segment.slice(1));
-  }
-  return words.join(" ");
-}
-
 function normalizePathSeparators(pathValue: string): string {
   return pathValue.replaceAll("\\", "/");
 }
@@ -26,7 +17,7 @@ export function formatProviderSkillDisplayName(
   if (displayName) {
     return displayName;
   }
-  return titleCaseWords(skill.name);
+  return skill.name;
 }
 
 export function dedupeProviderSkillsByName(
