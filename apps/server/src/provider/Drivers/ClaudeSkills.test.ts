@@ -4,8 +4,11 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 import { discoverClaudeSkills, skillOverrideSettingsPaths } from "./ClaudeSkills.ts";
+
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const writeSkill = Effect.fn(function* (
   skillsDir: string,
@@ -669,6 +672,77 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
           ["user-only-yes", true, false],
         ],
       );
+    }),
+  );
+
+  it.effect("namespaces skills from enabled plugins that apply to the workspace", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const configDir = path.join(tempDir, "claude-home");
+      const workspace = path.join(tempDir, "workspace");
+      const cache = path.join(configDir, "plugins", "cache");
+      const skillBody = ["---", "description: Plugin skill.", "---", "", "# Body"].join("\n");
+
+      yield* writeSkill(path.join(cache, "wt", "skills"), "pr", skillBody);
+      yield* writeSkill(path.join(cache, "off", "skills"), "hidden", skillBody);
+      yield* writeSkill(path.join(cache, "elsewhere", "skills"), "other", skillBody);
+      yield* writeSkill(path.join(cache, "here-user", "skills"), "old", skillBody);
+      yield* writeSkill(path.join(cache, "here-local", "skills"), "new", skillBody);
+      yield* fs.writeFileString(
+        path.join(configDir, "plugins", "installed_plugins.json"),
+        yield* encodeJson({
+          version: 2,
+          plugins: {
+            "wt@wt": [{ scope: "user", installPath: path.join(cache, "wt") }],
+            "off@market": [{ scope: "user", installPath: path.join(cache, "off") }],
+            "elsewhere@market": [
+              {
+                scope: "project",
+                projectPath: path.join(tempDir, "other-workspace"),
+                installPath: path.join(cache, "elsewhere"),
+              },
+            ],
+            "here@market": [
+              { scope: "user", installPath: path.join(cache, "here-user") },
+              {
+                scope: "local",
+                projectPath: workspace,
+                installPath: path.join(cache, "here-local"),
+              },
+            ],
+          },
+        }),
+      );
+      yield* fs.writeFileString(
+        path.join(configDir, "settings.json"),
+        '{ "enabledPlugins": { "wt@wt": true, "off@market": true, "elsewhere@market": true, "here@market": true } }',
+      );
+      yield* fs.makeDirectory(path.join(workspace, ".claude"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(workspace, ".claude", "settings.json"),
+        '{ "enabledPlugins": { "off@market": false } }',
+      );
+
+      const skills = yield* discoverClaudeSkills({ homePath: configDir }, workspace);
+
+      assert.deepEqual(skills, [
+        {
+          name: "here:new",
+          path: path.join(cache, "here-local", "skills", "new", "SKILL.md"),
+          enabled: true,
+          scope: "plugin",
+          description: "Plugin skill.",
+        },
+        {
+          name: "wt:pr",
+          path: path.join(cache, "wt", "skills", "pr", "SKILL.md"),
+          enabled: true,
+          scope: "plugin",
+          description: "Plugin skill.",
+        },
+      ]);
     }),
   );
 
