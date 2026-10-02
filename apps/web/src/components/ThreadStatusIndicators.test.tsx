@@ -77,6 +77,7 @@ describe("linked pull request snapshots", () => {
         updatedAt: "2026-01-02T00:00:00Z",
       },
       sourceControlProvider: { kind: "gitlab", name: "gitlab", baseUrl: "" },
+      checksState: null,
     });
   });
 });

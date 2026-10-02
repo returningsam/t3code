@@ -217,6 +217,7 @@ import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
+import { PullRequestChecksStateGlyph } from "./pullRequest/pullRequestPresentation";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import {
   deriveProviderEntriesByEnvironment,
@@ -1536,6 +1537,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         onOpenPullRequest={handlePrClick}
       />
     ) : null;
+  const prChecksState =
+    pr?.state === "open" ? (linkedPullRequestStatus?.checksState ?? null) : null;
+  const prChecksGlyph =
+    prBadge !== null && prChecksState !== null ? (
+      <PullRequestChecksStateGlyph state={prChecksState} />
+    ) : null;
   const terminalStatusIcon = terminalStatus ? (
     <span
       role="img"
@@ -1652,6 +1659,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
+            {prChecksGlyph}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -1963,6 +1971,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               )}
               {terminalStatusIcon}
               {prBadge}
+              {prChecksGlyph}
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}
