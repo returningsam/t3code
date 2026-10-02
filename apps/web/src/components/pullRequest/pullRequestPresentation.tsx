@@ -286,6 +286,22 @@ export function pullRequestChecksStatePresentation(state: PullRequestChecksState
   return CHECKS_STATE_PRESENTATION[state];
 }
 
+export function PullRequestChecksStateGlyph({ state }: { state: PullRequestChecksState }) {
+  const presentation = pullRequestChecksStatePresentation(state);
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+        <presentation.Icon
+          role="img"
+          aria-label={presentation.label}
+          className={cn("size-3.5", presentation.toneClassName)}
+        />
+      </TooltipTrigger>
+      <TooltipPopup>{presentation.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 /**
  * The same rollup the server sends with a listing row, worked out here from the checks a detail
  * already holds — so the header shows the icon without a second field travelling with it.

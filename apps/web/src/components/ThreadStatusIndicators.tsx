@@ -4,6 +4,7 @@ import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull
 import {
   resolveEnvironmentMachineKind,
   type EnvironmentId,
+  type PullRequestChecksState,
   type ThreadLinkedPullRequest,
   type ThreadPullRequestLink,
   type VcsStatusResult,
@@ -59,6 +60,7 @@ export type ThreadPr = VcsStatusResult["pr"];
 export interface LinkedThreadPullRequestStatus {
   readonly pr: NonNullable<ThreadPr>;
   readonly sourceControlProvider: NonNullable<VcsStatusResult["sourceControlProvider"]>;
+  readonly checksState: PullRequestChecksState | null;
 }
 
 /** Linked badges use persisted snapshots; only branch and legacy fallbacks lease summary reads. */
@@ -102,6 +104,7 @@ export function useLinkedThreadPullRequest(
       : {
           pr: pullRequestDetailToVcsStatus(detail),
           sourceControlProvider: { kind: detail.provider, name: detail.provider, baseUrl: "" },
+          checksState: detail.checksState ?? null,
         };
   }, [current, detail]);
 }
@@ -132,6 +135,7 @@ export function linkedPullRequestSnapshotStatus(
       ...(snapshot.updatedAt === null ? {} : { updatedAt: snapshot.updatedAt }),
     },
     sourceControlProvider: { kind, name: kind, baseUrl: "" },
+    checksState: snapshot.checksState ?? null,
   };
 }
 

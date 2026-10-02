@@ -141,6 +141,14 @@ export const make = Effect.gen(function* () {
     if (entries.every((entry) => entry.link.snapshot?.state === "merged")) return false;
     if (entries.some((entry) => entry.link.snapshot?.state === "open" && isUnsettled(entry.thread)))
       return true;
+    // CI usually finishes after the agent has settled, and the sidebar shows its state.
+    if (
+      entries.some(
+        (entry) =>
+          entry.link.snapshot?.state === "open" && entry.link.snapshot.checksState === "pending",
+      )
+    )
+      return true;
     // Closed requests can reopen on the host, including after the thread settles.
     const last = lastSyncedAt.get(key);
     return last === undefined || nowMs - last >= SLOW_SYNC_INTERVAL_MS;
