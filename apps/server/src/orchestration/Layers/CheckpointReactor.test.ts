@@ -1121,8 +1121,8 @@ describe("CheckpointReactor", () => {
     const pullRequestRefreshCalls: string[] = [];
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/feature",
-      localStatusRefName: "t3code/feature",
+      threadBranch: "wt/feature",
+      localStatusRefName: "wt/feature",
       pullRequestRefreshCalls,
     });
 
@@ -1148,8 +1148,8 @@ describe("CheckpointReactor", () => {
       const harness = yield* Effect.promise(() =>
         createHarness({
           seedFilesystemCheckpoints: false,
-          threadBranch: "t3code/feature",
-          localStatusRefName: "t3code/feature",
+          threadBranch: "wt/feature",
+          localStatusRefName: "wt/feature",
           pullRequestRefresh: Deferred.succeed(lookupStarted, undefined).pipe(
             Effect.andThen(Deferred.await(finishLookup)),
           ),
@@ -1188,8 +1188,8 @@ describe("CheckpointReactor", () => {
     const pullRequestRefreshCalls: string[] = [];
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/renamed-by-agent",
+      threadBranch: "wt/original-branch",
+      localStatusRefName: "wt/renamed-by-agent",
       pullRequestRefreshCalls,
     });
 
@@ -1235,8 +1235,8 @@ describe("CheckpointReactor", () => {
   it("adopts a drifted checkout as the thread branch on a dedicated worktree", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/renamed-by-agent",
+      threadBranch: "wt/original-branch",
+      localStatusRefName: "wt/renamed-by-agent",
     });
 
     harness.provider.emit({
@@ -1255,19 +1255,19 @@ describe("CheckpointReactor", () => {
       (event) =>
         event.type === "thread.meta-updated" &&
         (event as unknown as { payload: { branch?: string } }).payload.branch ===
-          "t3code/renamed-by-agent",
+          "wt/renamed-by-agent",
     );
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/renamed-by-agent");
+    expect(thread?.branch).toBe("wt/renamed-by-agent");
   });
 
   it("follows a checkout from a saved placeholder branch and refreshes its pull request", async () => {
     const pullRequestRefreshCalls: string[] = [];
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/fd9cbe0e",
+      threadBranch: "wt/fd9cbe0e",
       localStatusRefName: "fix/mobile-tool-detail-expansion",
       pullRequestRefreshCalls,
     });
@@ -1291,14 +1291,14 @@ describe("CheckpointReactor", () => {
     expect(pullRequestRefreshCalls).toEqual([harness.cwd]);
   });
 
-  it.each(["t3code/original-branch", "t3code/fd9cbe0e"])(
+  it.each(["wt/original-branch", "wt/fd9cbe0e"])(
     "does not adopt a drifted checkout from %s when the worktree is shared by another thread",
     async (threadBranch) => {
       const pullRequestRefreshCalls: string[] = [];
       const harness = await createHarness({
         seedFilesystemCheckpoints: false,
         threadBranch,
-        localStatusRefName: "t3code/renamed-by-agent",
+        localStatusRefName: "wt/renamed-by-agent",
         secondThreadSharingWorktree: true,
         pullRequestRefreshCalls,
       });
@@ -1325,8 +1325,8 @@ describe("CheckpointReactor", () => {
   it("does not adopt a temporary placeholder checkout as the thread branch", async () => {
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/original-branch",
-      localStatusRefName: "t3code/0a1b2c3d",
+      threadBranch: "wt/original-branch",
+      localStatusRefName: "wt/0a1b2c3d",
     });
 
     harness.provider.emit({
@@ -1343,15 +1343,15 @@ describe("CheckpointReactor", () => {
 
     const snapshot = await harness.readModel();
     const thread = snapshot.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.branch).toBe("t3code/original-branch");
+    expect(thread?.branch).toBe("wt/original-branch");
   });
 
   it("ignores auxiliary thread turn completion while primary turn is active", async () => {
     const pullRequestRefreshCalls: string[] = [];
     const harness = await createHarness({
       seedFilesystemCheckpoints: false,
-      threadBranch: "t3code/feature",
-      localStatusRefName: "t3code/feature",
+      threadBranch: "wt/feature",
+      localStatusRefName: "wt/feature",
       pullRequestRefreshCalls,
     });
     const createdAt = "2026-01-01T00:00:00.000Z";

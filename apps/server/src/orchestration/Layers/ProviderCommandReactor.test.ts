@@ -681,7 +681,7 @@ describe("ProviderCommandReactor", () => {
           commandId: CommandId.make("cmd-sign-out-worktree"),
           threadId,
           title: "New thread",
-          branch: "t3code/1234abcd",
+          branch: "wt/1234abcd",
           worktreePath: NodePath.join(harness.stateDir, "missing-worktree"),
         });
 
@@ -2639,7 +2639,7 @@ describe("ProviderCommandReactor", () => {
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-branch"),
         threadId: ThreadId.make("thread-1"),
-        branch: "t3code/1234abcd",
+        branch: "wt/1234abcd",
         worktreePath: "/tmp/provider-project-worktree",
       }),
     );

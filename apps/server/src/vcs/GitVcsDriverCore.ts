@@ -27,7 +27,12 @@ import {
   type ReviewDiffPreviewSource,
   type VcsRef,
 } from "@t3tools/contracts";
-import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  isTemporaryWorktreeBranch,
+  normalizeGitRemoteUrl,
+  WORKTREE_BRANCH_PREFIX,
+} from "@t3tools/shared/git";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -41,6 +46,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import { resolveWtLayout } from "./wtLayout.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
@@ -1099,6 +1105,41 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     });
   });
 
+  // Returns the wt layout container (see wtLayout.ts), or null for any other layout.
+  const resolveWtLayoutContainer = Effect.fn("resolveWtLayoutContainer")(function* (cwd: string) {
+    const commonDir = yield* runGitStdout("GitVcsDriver.resolveWtLayoutContainer", cwd, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]).pipe(
+      Effect.map((stdout) => stdout.trim()),
+      Effect.orElseSucceed(() => ""),
+    );
+    if (path.basename(commonDir) !== ".git") return null;
+    const layout = yield* resolveWtLayout(fileSystem, path, path.dirname(commonDir));
+    return layout?.container ?? null;
+  });
+
+  // Point <branch> at wt/<branch> so `git pull` in main/ picks up the worktree's commits.
+  // Leaves an existing <branch> alone rather than retargeting a branch it didn't create.
+  const linkWtTrackingBranch = Effect.fn("linkWtTrackingBranch")(function* (
+    cwd: string,
+    branch: string,
+  ) {
+    const prefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    if (!branch.startsWith(prefix) || isTemporaryWorktreeBranch(branch)) return;
+    if ((yield* resolveWtLayoutContainer(cwd)) === null) return;
+    const trackingBranch = branch.slice(prefix.length);
+    if (yield* branchExists(cwd, trackingBranch)) return;
+    yield* runGit("GitVcsDriver.linkWtTrackingBranch", cwd, [
+      "branch",
+      "--quiet",
+      "--track",
+      trackingBranch,
+      branch,
+    ]);
+  });
+
   const resolveCurrentUpstream = Effect.fn("resolveCurrentUpstream")(function* (cwd: string) {
     const upstreamRef = yield* runGitStdout(
       "GitVcsDriver.resolveCurrentUpstream",
@@ -1436,7 +1477,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   ) {
     const remoteNames = yield* listRemoteNames(cwd).pipe(Effect.orElseSucceed(() => []));
     const parsedRemoteRef = parseRemoteRefWithRemoteNames(branchName, remoteNames);
-    return parsedRemoteRef?.branchName ?? branchName;
+    const publishBranch = parsedRemoteRef?.branchName ?? branchName;
+    const prefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    return publishBranch.startsWith(prefix) ? publishBranch.slice(prefix.length) : publishBranch;
   });
 
   const resolvePrimaryRemoteName = Effect.fn("resolvePrimaryRemoteName")(function* (cwd: string) {
@@ -2172,6 +2215,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       // upstream ref ends in the branch name.
       const isAliasOfUpstreamHead =
         branch === currentUpstream.branchName ||
+        branch === `${WORKTREE_BRANCH_PREFIX}/${currentUpstream.branchName}` ||
         (branch.endsWith(`/${currentUpstream.branchName}`) &&
           currentUpstream.upstreamRef.endsWith(`/${branch}`));
       if (!isAliasOfUpstreamHead) {
@@ -3068,7 +3112,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const targetBranch = input.newRefName ?? input.refName;
     const sanitizedBranch = targetBranch.replace(/\//g, "-");
     const repoName = path.basename(input.cwd);
-    const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch);
+    const wtLayoutContainer = input.path ? null : yield* resolveWtLayoutContainer(input.cwd);
+    const worktreePath =
+      input.path ??
+      (wtLayoutContainer
+        ? path.join(wtLayoutContainer, "worktrees", sanitizedBranch)
+        : path.join(worktreesDir, repoName, sanitizedBranch));
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];
@@ -3188,6 +3237,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         baseBranch,
       ]);
     }
+
+    yield* linkWtTrackingBranch(input.cwd, targetBranch).pipe(Effect.ignoreCause({ log: true }));
 
     return {
       worktree: {
@@ -3511,6 +3562,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         fallbackErrorDetail: "git branch rename failed",
       },
     );
+    yield* linkWtTrackingBranch(input.cwd, targetBranch).pipe(Effect.ignoreCause({ log: true }));
 
     return { branch: targetBranch };
   });
