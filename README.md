@@ -1,92 +1,58 @@
-# T3 Code
+# T3 Code (fork)
 
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+A personal fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code). It tracks upstream `main` and adds the small changes listed below. The fork has no releases. The desktop app is built locally from source.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
+For what T3 Code is and which agents it supports, see the [upstream README](https://github.com/pingdotgg/t3code#readme).
 
-## "Wait, what are you selling me?"
+## Changes from upstream
 
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+- **Sidebar PR CI status.** Threads with a linked PR show its CI state in the sidebar. The server keeps polling an open PR while its checks are pending, even after the agent has finished.
+- **Claude plugin skills.** Skills from enabled Claude Code plugins appear in the skill pickers.
+- **Skill names as written.** The skill pickers show skill names verbatim instead of title-casing them.
+- **Mid-prompt slash menu.** Typing `/` after a space in the middle of a prompt opens the slash menu, not only at the start.
+- **Dark favicon contrast.** In dark mode, dark project favicons sit on a tile in the sidebar icon color, including behind the project filter button.
 
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
+## Build and install (macOS, Apple Silicon)
 
-## Installation
+Install and authenticate at least one provider first. See [Install and first run](./docs/user/install.md).
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Antigravity. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
-> - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
-
-### Command line
+T3 Code uses Vite+, so install the global `vp` tool and the dependencies:
 
 ```bash
-curl -fsSL https://t3.codes/install.sh | sh
+curl -fsSL https://vite.plus | bash
+vp i
 ```
 
-On Windows, in PowerShell:
-
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
-
-To try it once without installing, run `npx t3@latest` instead.
-
-### Desktop app
-
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
-
-#### Windows (`winget`)
+The resource monitor needs a cargo that supports the 2024 edition. Homebrew's cargo works, so put it first on `PATH` when building:
 
 ```bash
-winget install T3Tools.T3Code
+PATH="/opt/homebrew/bin:$PATH" pnpm dist:desktop:dmg:arm64
 ```
 
-#### macOS (Homebrew)
+Then replace the installed app with the new build. Run this outside T3 Code, since it quits the app:
 
 ```bash
-brew install --cask t3-code
+osascript -e 'quit app "T3 Code (Alpha)"'
+rm -rf "/Applications/T3 Code (Alpha).app"
+ditto -x -k "$(ls -t release/*-arm64.zip | head -1)" /Applications
+codesign --force --deep --sign "T3 Fork Local" "/Applications/T3 Code (Alpha).app"
+open -a "T3 Code (Alpha)"
 ```
 
-#### Debian, Ubuntu (`.deb`)
+The `codesign` step re-signs the app with a local self-signed certificate named "T3 Fork Local". A stable signature across rebuilds stops the keychain from asking for a password at every launch. Skip it, or use your own certificate name, if you don't have one.
 
-Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
+To run a dev server instead of a build, use `pnpm dev` (or `pnpm dev:desktop` for the Electron shell).
+
+## Syncing with upstream
 
 ```bash
-sudo apt install ./T3-Code-*.deb
+git fetch upstream
+git merge upstream/main
 ```
-
-#### Arch Linux (AUR)
-
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
-
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
 
 ## Documentation
 
-Full docs live in [docs/](./docs). There's no docs site yet.
+Full docs live in [docs/](./docs). They describe upstream T3 Code and apply to the fork too.
 
 - [Install and first run](./docs/user/install.md)
 - [Permission modes](./docs/user/permission-modes.md)
@@ -98,36 +64,4 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 - [Run T3 Code as a background service](./docs/user/background-service.md)
 
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
-
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
-
-```bash
-irm https://vite.plus/ps1 | iex
-```
-
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
-
-### Install dependencies
-
-```bash
-vp i
-```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
-
-Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+For build internals, start at [docs/internals/overview.md](./docs/internals/overview.md).
