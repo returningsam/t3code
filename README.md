@@ -6,7 +6,7 @@ For what T3 Code is and which agents it supports, see the [upstream README](http
 
 ## Changes from upstream
 
-- **wt worktree layout.** In a repo with a `.wt` file (written by the wt plugin's `/wt:setup`), new worktrees go in `<repo>/worktrees/wt-<branch>` on `wt/<branch>` branches instead of `~/.t3/worktrees` on `t3code/...` branches. A new project opened at `<repo>/main` takes its title from the `.wt` file's name.
+- **wt worktree layout.** Support for the layout from [wt](https://github.com/returningsam/wt), a Claude Code plugin with worktree hooks and skills. In a repo with a `.wt` file (written by `/wt:setup`), new worktrees go in `<repo>/worktrees/wt-<branch>` on `wt/<branch>` branches instead of `~/.t3/worktrees` on `t3code/...` branches. A new project opened at `<repo>/main` takes its title from the `.wt` file's name.
 - **Sidebar PR CI status.** Threads with a linked PR show its CI state in the sidebar. The server keeps polling an open PR while its checks are pending, even after the agent has finished.
 - **Claude plugin skills.** Skills from enabled Claude Code plugins appear in the skill pickers.
 - **Skill names as written.** The skill pickers show skill names verbatim instead of title-casing them.
