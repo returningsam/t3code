@@ -203,7 +203,8 @@ describe("GitWorkflowService", () => {
         operation: "GitWorkflowService.pullCurrentBranch",
         command: "vcs-route",
         cwd: "/not-a-repo",
-        detail: "/not-a-repo is not a Git repository.",
+        reason: "not_a_repository",
+        detail: "This directory is not a Git repository.",
       });
     }).pipe(
       Effect.provide(

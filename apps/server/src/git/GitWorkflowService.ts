@@ -179,7 +179,7 @@ export const make = Effect.gen(function* () {
           new GitManagerError({
             operation,
             cwd,
-            detail: "Failed to resolve the VCS driver for this Git workflow.",
+            detail: "Failed to detect a VCS repository for this Git workflow.",
             cause,
           }),
       ),
@@ -211,7 +211,7 @@ export const make = Effect.gen(function* () {
             operation,
             command: "vcs-route",
             cwd,
-            detail: "Failed to resolve the VCS driver for this Git command.",
+            detail: "Failed to detect a VCS repository for this Git command.",
             cause,
           }),
       ),
@@ -221,7 +221,8 @@ export const make = Effect.gen(function* () {
         operation,
         command: "vcs-route",
         cwd,
-        detail: `${cwd} is not a Git repository.`,
+        reason: "not_a_repository",
+        detail: "This directory is not a Git repository.",
       });
     }
     if (handle.kind !== "git") {
