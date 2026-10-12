@@ -1,6 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -10,7 +9,6 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { resolveAgyCommand } from "./process.ts";
 import { checkAntigravityCliStatus } from "./status.ts";
 
 const encoder = new TextEncoder();
@@ -53,15 +51,15 @@ const agySpawner = (models: { stdout?: string; stderr?: string; exitCode?: numbe
     );
   });
 
+const check = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+  checkAntigravityCliStatus(settings, {}).pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+  );
+
 describe("checkAntigravityCliStatus", () => {
   it.effect("reports a signed-in agy with its models", () =>
     Effect.gen(function* () {
-      const snapshot = yield* checkAntigravityCliStatus(settings, {}).pipe(
-        Effect.provideService(
-          ChildProcessSpawner.ChildProcessSpawner,
-          agySpawner({ stdout: yield* readFixture("models.txt") }),
-        ),
-      );
+      const snapshot = yield* check(agySpawner({ stdout: yield* readFixture("models.txt") }));
       assert.deepInclude(snapshot, {
         status: "ready",
         installed: true,
@@ -76,17 +74,14 @@ describe("checkAntigravityCliStatus", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("tells the user to sign in with agy itself", () =>
+  it.effect.each([0, 1])("tells the user to sign in with agy itself (exit code %s)", (exitCode) =>
     Effect.gen(function* () {
-      const snapshot = yield* checkAntigravityCliStatus(settings, {}).pipe(
-        Effect.provideService(
-          ChildProcessSpawner.ChildProcessSpawner,
-          agySpawner({
-            stderr:
-              "Fetching available models...\nError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n",
-            exitCode: 1,
-          }),
-        ),
+      const snapshot = yield* check(
+        agySpawner({
+          stderr:
+            "Fetching available models...\nError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n",
+          exitCode,
+        }),
       );
       assert.equal(snapshot.status, "error");
       assert.equal(snapshot.auth.status, "unauthenticated");
@@ -94,48 +89,33 @@ describe("checkAntigravityCliStatus", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("leaves sign-in unknown when agy lists no models", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* check(agySpawner({ stdout: "" }));
+      assert.equal(snapshot.auth.status, "unknown");
+      assert.deepEqual(
+        snapshot.models.map((model) => model.slug),
+        ["default"],
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reports agy as not installed when it cannot be spawned", () =>
     Effect.gen(function* () {
-      const snapshot = yield* checkAntigravityCliStatus(settings, {}).pipe(
-        Effect.provideService(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() =>
-            Effect.fail(
-              PlatformError.systemError({
-                _tag: "NotFound",
-                module: "ChildProcess",
-                method: "spawn",
-                description: "spawn agy ENOENT",
-              }),
-            ),
+      const snapshot = yield* check(
+        ChildProcessSpawner.make(() =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "ChildProcess",
+              method: "spawn",
+              description: "spawn agy ENOENT",
+            }),
           ),
         ),
       );
       assert.equal(snapshot.installed, false);
       assert.include(snapshot.message ?? "", "not installed");
     }).pipe(Effect.provide(NodeServices.layer)),
-  );
-});
-
-describe("resolveAgyCommand", () => {
-  it.effect("finds agy's default install when it is not on PATH", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "agy-home-" });
-      const installed = path.join(home, ".local", "bin", "agy");
-      yield* fileSystem.makeDirectory(path.dirname(installed), { recursive: true });
-      yield* fileSystem.writeFileString(installed, "#!/bin/sh\n");
-      yield* fileSystem.chmod(installed, 0o755);
-      const emptyPath = { PATH: path.join(home, "empty") };
-
-      const resolve = (binaryPath: string) =>
-        resolveAgyCommand(binaryPath, emptyPath).pipe(
-          Effect.provideService(HostProcess.HomeDirectory, home),
-          Effect.provideService(HostProcess.Platform, "darwin"),
-        );
-      assert.equal(yield* resolve("agy"), installed);
-      assert.equal(yield* resolve("/opt/agy"), "/opt/agy");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

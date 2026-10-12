@@ -4,11 +4,10 @@
  *
  * @module provider-antigravity-cli/server/process
  */
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isCommandAvailable, resolveSpawnCommand } from "@t3tools/shared/shell";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -26,23 +25,6 @@ export class AgyProcessError extends Schema.TaggedError<AgyProcessError>()("AgyP
   }
 }
 
-/**
- * The command to run for `binaryPath`. agy installs to `~/.local/bin`, which
- * a desktop-launched server often lacks on PATH, so the default `agy` falls
- * back to that location.
- */
-export const resolveAgyCommand = Effect.fn("resolveAgyCommand")(function* (
-  binaryPath: string,
-  environment: NodeJS.ProcessEnv,
-) {
-  if (binaryPath !== "agy" || (yield* isCommandAvailable(binaryPath, { env: environment }))) {
-    return binaryPath;
-  }
-  const path = yield* Path.Path;
-  const installed = path.join(yield* HostProcess.HomeDirectory, ".local", "bin", "agy");
-  return (yield* isCommandAvailable(installed, { env: environment })) ? installed : binaryPath;
-});
-
 export interface AgyProcess {
   /** Stdout events in arrival order. Ends when stdout closes. */
   readonly events: Queue.Dequeue<AgyEvent, Cause.Done>;
@@ -52,9 +34,16 @@ export interface AgyProcess {
   readonly exitCode: Effect.Effect<number | null>;
   /** Terminates the process group this handle spawned. */
   readonly kill: Effect.Effect<void>;
+  /**
+   * The end of agy's plain-text output (stderr and non-event stdout lines),
+   * which holds its reason for a failed launch. It can quote the prompt, so it
+   * goes into the user's failure message and never into logs.
+   */
+  readonly diagnostics: Effect.Effect<string>;
 }
 
 const TERMINATION_GRACE = "2 seconds";
+const DIAGNOSTICS_MAX_CHARS = 2_000;
 
 /** Spawns agy in the current scope; closing the scope terminates it. */
 export const spawnAgy = Effect.fnUntraced(function* (options: {
@@ -81,24 +70,30 @@ export const spawnAgy = Effect.fnUntraced(function* (options: {
 
   const events = yield* Queue.unbounded<AgyEvent, Cause.Done>();
   const outgoing = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+  let diagnostics = "";
+  const keepDiagnostics = (text: string) => {
+    diagnostics = `${diagnostics}${text}`.slice(-DIAGNOSTICS_MAX_CHARS);
+  };
 
   yield* child.stdout.pipe(
     Stream.decodeText(),
     Stream.splitLines,
     Stream.runForEach((line) => {
       const event = parseAgyEvent(line);
-      return event === undefined ? Effect.void : Queue.offer(events, event);
+      if (event !== undefined) return Queue.offer(events, event);
+      if (line.trim().length > 0) keepDiagnostics(`${line}\n`);
+      return Effect.void;
     }),
     Effect.ignore,
     Effect.ensuring(Queue.end(events)),
     Effect.forkScoped,
   );
-  // agy prints diagnostics to stderr. They can carry prompt text, so only
-  // their size is logged.
+  const stderrDone = yield* Deferred.make<void>();
   yield* child.stderr.pipe(
     Stream.decodeText(),
-    Stream.runForEach((chunk) => Effect.logDebug("agy stderr", { stderrLength: chunk.length })),
+    Stream.runForEach((chunk) => Effect.sync(() => keepDiagnostics(chunk))),
     Effect.ignore,
+    Effect.ensuring(Deferred.succeed(stderrDone, undefined)),
     Effect.forkScoped,
   );
   yield* Stream.fromQueue(outgoing).pipe(Stream.run(child.stdin), Effect.ignore, Effect.forkScoped);
@@ -112,5 +107,9 @@ export const spawnAgy = Effect.fnUntraced(function* (options: {
       Effect.orElseSucceed(() => null),
     ),
     kill: child.kill({ forceKillAfter: TERMINATION_GRACE }).pipe(Effect.ignore),
+    diagnostics: Deferred.await(stderrDone).pipe(
+      Effect.timeoutOption("1 second"),
+      Effect.map(() => diagnostics.trim()),
+    ),
   } satisfies AgyProcess;
 });

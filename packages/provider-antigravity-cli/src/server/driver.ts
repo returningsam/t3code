@@ -7,8 +7,6 @@
  */
 import { TextGenerationError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
@@ -42,8 +40,6 @@ const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
 
 export type AntigravityCliDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
-  | FileSystem.FileSystem
-  | Path.Path
   | ProviderHost.ProviderHost;
 
 const unsupportedTextGeneration: ProviderTextGeneration = (() => {
@@ -72,8 +68,6 @@ export const AntigravityCliDriver: ProviderDriver<AntigravityCliSettings, Antigr
     create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
         const processEnvironment = yield* mergeProviderInstanceEnvironment(environment);
         const settings = { ...config, enabled } satisfies AntigravityCliSettings;
         const continuationIdentity = defaultProviderContinuationIdentity({
@@ -101,8 +95,6 @@ export const AntigravityCliDriver: ProviderDriver<AntigravityCliSettings, Antigr
           checkProvider: checkAntigravityCliStatus(settings, processEnvironment).pipe(
             Effect.map(stampIdentity),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-            Effect.provideService(Path.Path, path),
           ),
         }).pipe(
           Effect.mapError(

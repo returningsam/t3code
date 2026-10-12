@@ -30,9 +30,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
@@ -49,7 +47,7 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import type { AntigravityCliSettings } from "../settings.ts";
-import { resolveAgyCommand, spawnAgy, type AgyProcess } from "./process.ts";
+import { spawnAgy, type AgyProcess } from "./process.ts";
 import {
   AGY_SIGNED_OUT_MESSAGE,
   agyDeniedActionsNotice,
@@ -74,9 +72,10 @@ const AntigravityCliCapabilitiesV2 = {
   runtimePolicy: { enforcement: "native" },
   sessions: {
     supportsMultipleProviderThreadsPerSession: false,
-    // Model and runtime mode changes restart agy on the same conversation at the next turn.
+    // A model change restarts agy on the same conversation at the next turn.
     supportsModelSwitchInSession: true,
-    supportsRuntimeModeSwitchInSession: true,
+    // A permission change reopens the session, which stops an unrestricted agy mid-turn.
+    supportsRuntimeModeSwitchInSession: false,
     supportsProviderSwitchingViaHandoff: true,
     pendingRequestsSurviveRestart: false,
   },
@@ -220,13 +219,15 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
   options: AntigravityCliAdapterOptions,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const host = yield* ProviderHost.ProviderHost;
   const agentScope = yield* AgentScope;
 
   const protocolError = (detail: string) =>
     new ProviderAdapter.ProviderAdapterProtocolError({ driver: DRIVER, detail });
+  const refusePlanMode = (policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy | undefined) =>
+    policy?.interactionMode === "plan"
+      ? Effect.fail(protocolError("Antigravity CLI does not support Plan mode"))
+      : Effect.void;
 
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
@@ -237,6 +238,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
       input: ProviderAdapter.ProviderAdapterV2OpenSessionInput,
     ) {
       if (!options.settings.enabled) return yield* protocolError("Antigravity CLI is disabled");
+      yield* refusePlanMode(input.runtimePolicy);
       // Holds agy processes and their readers. The session finalizer below is
       // added later, so it settles the active turn before this scope closes.
       const workScope = yield* Scope.fork(yield* Effect.scope);
@@ -402,7 +404,6 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         yield* emit({ type: "turn_item.updated", driver: DRIVER, turnItem });
       });
 
-      // Streaming text is published at most every STREAM_FLUSH_MS.
       const scheduleFlush = (turn: ActiveTurn, item: StepItem) =>
         Effect.suspend(() => {
           if (item.flushScheduled) return Effect.void;
@@ -553,10 +554,10 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         if (step.tool_info?.parameters !== undefined) item.parameters = step.tool_info.parameters;
         const output = step.tool_info?.output ?? step.tool_info?.error?.message;
         if (output !== undefined) item.output = output;
-        if (step.state === "ACTIVE") {
+        if (step.state !== "DONE" && step.state !== "ERROR") {
           return yield* kind === "assistant" ? scheduleFlush(turn, item) : publishStep(turn, item);
         }
-        item.status = step.state === "ERROR" ? "failed" : "completed";
+        item.status = step.state === "DONE" ? "completed" : "failed";
         if (kind === "assistant" && step.usage !== undefined) {
           const usage = turn.usage ?? { input: 0, cached: 0, output: 0, reasoning: 0 };
           const cached = step.usage.cache_read_tokens ?? 0;
@@ -572,9 +573,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
 
       const onResult = Effect.fnUntraced(function* (turn: ActiveTurn, result: AgyResult) {
         const notice = agyDeniedActionsNotice(result.denied_actions ?? [], {
-          suggestFullAccess:
-            turn.process.launch.runtimeMode !== "full-access" &&
-            turn.process.launch.interactionMode !== "plan",
+          suggestFullAccess: turn.process.launch.runtimeMode !== "full-access",
         });
         if (notice !== undefined) yield* emitNotice(turn, notice);
         if (result.status === "SUCCESS") return yield* finish(turn, "completed");
@@ -592,19 +591,23 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
           return Effect.void;
         });
 
+      /** Why agy exited, with the end of its own output when it printed any. */
+      const exitDetail = Effect.fnUntraced(function* (agy: AgyProcess, what: string) {
+        const code = Option.getOrNull(yield* agy.exitCode.pipe(Effect.timeoutOption("1 second")));
+        const output = yield* agy.diagnostics;
+        return `${what}${code === null ? "" : ` (exit code ${code})`}${output ? `: ${output}` : ""}`;
+      });
+
       const onExit = Effect.fnUntraced(function* (process: LiveProcess) {
         if (live === process) live = undefined;
-        yield* Scope.close(process.scope, Exit.void);
         const turn = active;
+        const failed =
+          !closed && turn?.process === process && !turn.interruptRequested
+            ? yield* exitDetail(process.agy, "agy exited before the turn finished")
+            : undefined;
+        yield* Scope.close(process.scope, Exit.void);
         if (closed || turn === undefined || turn.process !== process) return;
-        if (turn.interruptRequested) return yield* finish(turn, "interrupted");
-        const code = yield* process.agy.exitCode.pipe(Effect.timeoutOption("1 second"));
-        const exitCode = Option.getOrNull(code);
-        yield* finish(
-          turn,
-          "failed",
-          `agy exited before the turn finished${exitCode === null ? "" : ` (exit code ${exitCode})`}.`,
-        );
+        yield* failed === undefined ? finish(turn, "interrupted") : finish(turn, "failed", failed);
       });
 
       const stopProcess = (process: LiveProcess) =>
@@ -618,11 +621,8 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         while (true) {
           const event = yield* Queue.take(agy.events).pipe(Effect.orElseSucceed(() => undefined));
           if (event === undefined) {
-            const code = Option.getOrNull(
-              yield* agy.exitCode.pipe(Effect.timeoutOption("1 second")),
-            );
             return yield* protocolError(
-              `agy exited before opening a conversation${code === null ? "" : ` (exit code ${code})`}`,
+              yield* exitDetail(agy, "agy exited before opening a conversation"),
             );
           }
           if (event.event === "init") return event.conversation_id;
@@ -639,10 +639,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         if (live !== undefined) yield* stopProcess(live);
         const processScope = yield* Scope.fork(workScope);
         return yield* Effect.gen(function* () {
-          const command = yield* resolveAgyCommand(
-            options.settings.binaryPath,
-            options.environment,
-          );
+          const command = options.settings.binaryPath;
           const wrapped = yield* agentScope.wrap({
             command,
             args: agyLaunchArgs(launch, conversationId),
@@ -676,14 +673,14 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
           live = process;
           yield* Stream.fromQueue(agy.events).pipe(
             Stream.runForEach((event) => permit.withPermits(1)(onEvent(process, event))),
-            Effect.andThen(permit.withPermits(1)(onExit(process))),
+            Effect.onExit((exit) =>
+              Exit.hasInterrupts(exit) ? Effect.void : permit.withPermits(1)(onExit(process)),
+            ),
             Effect.forkIn(workScope),
           );
           return process;
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(Path.Path, path),
           Effect.onError(() => Scope.close(processScope, Exit.void)),
         );
       });
@@ -697,7 +694,6 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
             resolveAgyLaunch({
               modelSelection,
               runtimeMode: runtimePolicy.runtimeMode,
-              interactionMode: runtimePolicy.interactionMode,
               models,
             }),
           ),
@@ -743,6 +739,24 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         return thread;
       });
 
+      /** Starts agy on a conversation. agy opens a new one when it no longer has it. */
+      const resumeConversation = Effect.fnUntraced(function* (
+        launch: AgyLaunch,
+        conversationId: string,
+      ) {
+        const process = yield* startProcess(launch, conversationId);
+        if (process.conversationId === conversationId) return process;
+        yield* stopProcess(process);
+        return yield* protocolError(`agy could not resume conversation ${conversationId}`);
+      });
+
+      /** Ends the session so the session manager reopens it and resumes the thread. */
+      const endSession = Effect.fnUntraced(function* (detail: string) {
+        closed = true;
+        yield* updateSession("stopped", detail);
+        yield* Queue.end(events);
+      });
+
       yield* Effect.addFinalizer(() =>
         permit.withPermits(1)(
           Effect.gen(function* () {
@@ -764,6 +778,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
             .withPermits(1)(
               Effect.gen(function* () {
                 if (closed) return yield* protocolError("The Antigravity CLI session is closed");
+                yield* refusePlanMode(args.runtimePolicy);
                 if (active !== undefined) {
                   return yield* protocolError("Cannot change threads during an agy turn");
                 }
@@ -778,10 +793,11 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   return current;
                 }
                 const launch = yield* launchFor(args.modelSelection, args.runtimePolicy);
-                const process = yield* startProcess(
-                  launch,
-                  existing?.nativeThreadRef?.nativeId ?? undefined,
-                );
+                const requested = existing?.nativeThreadRef?.nativeId ?? undefined;
+                const process =
+                  requested === undefined
+                    ? yield* startProcess(launch, undefined)
+                    : yield* resumeConversation(launch, requested);
                 return yield* bindThread(process.conversationId, args.threadId, existing);
               }),
             )
@@ -800,6 +816,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
             .withPermits(1)(
               Effect.gen(function* () {
                 if (closed) return yield* protocolError("The Antigravity CLI session is closed");
+                yield* refusePlanMode(args.runtimePolicy);
                 if (active !== undefined) {
                   return yield* protocolError("Cannot resume a thread during an agy turn");
                 }
@@ -811,16 +828,8 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   args.modelSelection ?? input.modelSelection,
                   args.runtimePolicy ?? input.runtimePolicy,
                 );
-                const process =
-                  live?.conversationId === conversationId
-                    ? live
-                    : yield* startProcess(launch, conversationId);
-                // agy opens a new conversation when it cannot find the requested one.
-                if (process.conversationId !== conversationId) {
-                  yield* stopProcess(process);
-                  return yield* protocolError(
-                    `agy could not resume conversation ${conversationId}`,
-                  );
+                if (live?.conversationId !== conversationId) {
+                  yield* resumeConversation(launch, conversationId);
                 }
                 return yield* bindThread(
                   conversationId,
@@ -845,6 +854,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
             .withPermits(1)(
               Effect.gen(function* () {
                 if (closed) return yield* protocolError("The Antigravity CLI session is closed");
+                yield* refusePlanMode(turnInput.runtimePolicy);
                 const conversationId = thread?.nativeThreadRef?.nativeId;
                 if (
                   thread === undefined ||
@@ -871,9 +881,11 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   process = yield* startProcess(launch, conversationId);
                   if (process.conversationId !== conversationId) {
                     yield* stopProcess(process);
-                    return yield* protocolError(
-                      `agy could not resume conversation ${conversationId}`,
-                    );
+                    const detail = `agy could not resume conversation ${conversationId}`;
+                    // Reopening the session fails the resume, which falls back to a new
+                    // conversation that receives the thread's history.
+                    yield* endSession(detail);
+                    return yield* protocolError(detail);
                   }
                 }
                 const startedAt = yield* DateTime.now;
@@ -939,17 +951,16 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         interruptTurn: (args) =>
           Effect.gen(function* () {
             const turn = active;
-            if (turn === undefined && args.requestRuntimeRestart === true) {
-              if (live !== undefined) yield* permit.withPermits(1)(stopProcess(live));
-              return;
-            }
+            // A settled turn has nothing left to stop.
+            if (turn === undefined && args.requestRuntimeRestart === true) return;
             if (turn === undefined || turn.providerTurn.id !== args.providerTurnId) {
               return yield* protocolError("This agy turn is no longer active");
             }
             turn.interruptRequested = true;
-            // agy reports the stopped turn and exits; the next turn resumes the conversation.
-            yield* turn.process.agy.kill;
+            // Retired before the kill, so a turn queued behind this one starts a new
+            // process on the same conversation instead of writing to the dying one.
             if (live === turn.process) live = undefined;
+            yield* turn.process.agy.kill;
             const stopped = yield* Deferred.await(turn.done).pipe(
               Effect.timeoutOption(STOP_TIMEOUT),
             );

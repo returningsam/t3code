@@ -142,7 +142,7 @@ computer.
 | Grok Build      | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                                                                                        |
 | OpenCode        | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                                                                                  |
 | Antigravity     | Install and sign in with Google from T3 Code's provider settings.                                                                                         |
-| Antigravity CLI | Install the Antigravity CLI, then run `agy` and sign in.                                                                                                  |
+| Antigravity CLI | Install the [Antigravity CLI](https://antigravity.google), then run `agy` and sign in.                                                                    |
 | Pi              | Install [Pi](./providers-pi.md#set-up-pi) with Node.js 22.19 or newer, then run `pi` and `/login`.                                                        |
 | Muse Code       | Install [Muse Code](https://dev.meta.ai/docs/muse-code) on the server, run `muse login`, then enable it in Settings → Providers.                          |
 
@@ -174,8 +174,7 @@ their original values.
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Claude](./providers-claude.md), [OpenCode](./providers-opencode.md),
 [Antigravity](./providers-antigravity.md), [Antigravity CLI](./providers-antigravity-cli.md),
-[Pi](./providers-pi.md), and
-[Muse Code](./providers-muse.md).
+[Pi](./providers-pi.md), and [Muse Code](./providers-muse.md).
 
 ## Next steps
 

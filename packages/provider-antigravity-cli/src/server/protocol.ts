@@ -13,7 +13,6 @@
 import {
   type ModelCapabilities,
   type ModelSelection,
-  type ProviderInteractionMode,
   type RuntimeMode,
   type ServerProviderModel,
 } from "@t3tools/contracts";
@@ -105,11 +104,10 @@ export interface AgyLaunch {
   readonly model: string | undefined;
   readonly effort: string | undefined;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
 }
 
 export const agyLaunchKey = (launch: AgyLaunch): string =>
-  [launch.model ?? "", launch.effort ?? "", launch.runtimeMode, launch.interactionMode].join("\0");
+  [launch.model ?? "", launch.effort ?? "", launch.runtimeMode].join("\0");
 
 export function agyLaunchArgs(launch: AgyLaunch, conversationId?: string): Array<string> {
   return [
@@ -120,13 +118,7 @@ export function agyLaunchArgs(launch: AgyLaunch, conversationId?: string): Array
     ...(conversationId === undefined ? [] : ["--conversation", conversationId]),
     ...(launch.model === undefined ? [] : ["--model", launch.model]),
     ...(launch.effort === undefined ? [] : ["--effort", launch.effort]),
-    // In print mode agy approves its own plan and goes on to implement it, so
-    // plan turns keep agy's permission rules even in full access.
-    ...(launch.interactionMode === "plan"
-      ? ["--mode", "plan"]
-      : launch.runtimeMode === "full-access"
-        ? ["--dangerously-skip-permissions"]
-        : []),
+    ...(launch.runtimeMode === "full-access" ? ["--dangerously-skip-permissions"] : []),
     // A bare `-p` takes the next flag as the prompt. `-p=` leaves the prompt
     // empty so turns come from stdin.
     "-p=",
@@ -136,30 +128,40 @@ export function agyLaunchArgs(launch: AgyLaunch, conversationId?: string): Array
 export function resolveAgyLaunch(input: {
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
   readonly models: ReadonlyArray<ServerProviderModel>;
 }): AgyLaunch {
   const model =
     input.modelSelection.model === AGY_DEFAULT_MODEL ? undefined : input.modelSelection.model;
-  const capabilities = input.models.find((entry) => entry.slug === model)?.capabilities;
   return {
     model,
-    effort: model === undefined ? undefined : resolveAgyEffort(capabilities, input.modelSelection),
+    effort:
+      model === undefined
+        ? undefined
+        : resolveAgyEffort(
+            input.models.find((entry) => entry.slug === model),
+            input.modelSelection,
+          ),
     runtimeMode: input.runtimeMode,
-    interactionMode: input.interactionMode,
   };
 }
 
-/** The selected effort when the model offers it, else the model's default effort. */
+/**
+ * The selected effort when the model offers it, else the model's default
+ * effort. A model missing from the list, such as before agy's models load,
+ * keeps any valid selected effort.
+ */
 function resolveAgyEffort(
-  capabilities: ModelCapabilities | null | undefined,
+  model: ServerProviderModel | undefined,
   modelSelection: ModelSelection,
 ): string | undefined {
-  const descriptor = capabilities?.optionDescriptors?.find(
+  const selected = getModelSelectionStringOptionValue(modelSelection, AGY_EFFORT_OPTION);
+  if (model === undefined) {
+    return AGY_EFFORT_LEVELS.find((level) => level === selected);
+  }
+  const descriptor = model.capabilities?.optionDescriptors?.find(
     (candidate) => candidate.id === AGY_EFFORT_OPTION,
   );
   if (descriptor?.type !== "select") return undefined;
-  const selected = getModelSelectionStringOptionValue(modelSelection, AGY_EFFORT_OPTION);
   return (
     descriptor.options.find((option) => option.id === selected)?.id ??
     descriptor.options.find((option) => option.isDefault)?.id ??
@@ -269,7 +271,7 @@ export const AGY_SIGNED_OUT_MESSAGE =
 
 /** Whether agy output says it has no signed-in account. */
 export const isAgySignedOutOutput = (output: string): boolean =>
-  /\bsign in\b|\blog in\b|authentication (?:required|failed)/i.test(output);
+  /please sign in|not signed in|not logged in|authentication (?:required|failed)/i.test(output);
 
 /** Tells the user what agy blocked, since print mode cannot ask for approval. */
 export function agyDeniedActionsNotice(

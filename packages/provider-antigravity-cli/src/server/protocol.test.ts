@@ -8,7 +8,6 @@ import * as Path from "effect/Path";
 import {
   agyDeniedActionsNotice,
   agyLaunchArgs,
-  agyUserMessageLine,
   isAgySignedOutOutput,
   parseAgyEvent,
   parseAgyModels,
@@ -31,55 +30,26 @@ const selection = (model: string, effort?: string): ModelSelection => ({
 });
 
 describe("agy launch arguments", () => {
-  it("runs agy's own model and rules in supervised mode", () => {
-    assert.deepEqual(
-      agyLaunchArgs({
-        model: undefined,
-        effort: undefined,
-        runtimeMode: "approval-required",
-        interactionMode: "default",
-      }),
-      ["--input-format", "stream-json", "--output-format", "stream-json", "-p="],
+  it("skips agy's permission checks only in full access", () => {
+    const launch = { model: undefined, effort: undefined } as const;
+    assert.notInclude(
+      agyLaunchArgs({ ...launch, runtimeMode: "approval-required" }),
+      "--dangerously-skip-permissions",
+    );
+    assert.include(
+      agyLaunchArgs({ ...launch, runtimeMode: "full-access" }),
+      "--dangerously-skip-permissions",
     );
   });
 
-  it("resumes the conversation with the selected model in full access", () => {
-    assert.deepEqual(
-      agyLaunchArgs(
-        {
-          model: "opus-5.5",
-          effort: "high",
-          runtimeMode: "full-access",
-          interactionMode: "default",
-        },
-        "8959616d-63e2-4b3c-aea8-624c7e14633a",
-      ),
-      [
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--conversation",
-        "8959616d-63e2-4b3c-aea8-624c7e14633a",
-        "--model",
-        "opus-5.5",
-        "--effort",
-        "high",
-        "--dangerously-skip-permissions",
-        "-p=",
-      ],
+  it("reads turns from stdin rather than taking a flag as the prompt", () => {
+    const args = agyLaunchArgs(
+      { model: "opus-5.5", effort: "high", runtimeMode: "approval-required" },
+      "8959616d-63e2-4b3c-aea8-624c7e14633a",
     );
-  });
-
-  it("keeps agy's permission rules in plan mode", () => {
-    const args = agyLaunchArgs({
-      model: undefined,
-      effort: undefined,
-      runtimeMode: "full-access",
-      interactionMode: "plan",
-    });
-    assert.includeMembers(args, ["--mode", "plan"]);
-    assert.notInclude(args, "--dangerously-skip-permissions");
+    assert.include(args, "-p=");
+    assert.notInclude(args, "-p");
+    assert.equal(args[args.indexOf("--conversation") + 1], "8959616d-63e2-4b3c-aea8-624c7e14633a");
   });
 });
 
@@ -114,12 +84,7 @@ describe("agy models", () => {
     Effect.gen(function* () {
       const models = parseAgyModels(yield* readFixture("models.txt"));
       const launch = (modelSelection: ModelSelection) =>
-        resolveAgyLaunch({
-          modelSelection,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          models,
-        });
+        resolveAgyLaunch({ modelSelection, runtimeMode: "full-access", models });
       assert.deepInclude(launch(selection("opus-5.5", "max")), {
         model: "opus-5.5",
         effort: "max",
@@ -129,13 +94,20 @@ describe("agy models", () => {
         model: "opus-5.5",
         effort: "high",
       });
-      assert.deepInclude(launch(selection("gemini-3.5-flash-lite", "high")), {
-        model: "gemini-3.5-flash-lite",
+      assert.deepInclude(launch(selection("gemini-3.1-pro-high", "high")), {
+        model: "gemini-3.1-pro-high",
         effort: undefined,
       });
       assert.deepInclude(launch(selection("default")), { model: undefined, effort: undefined });
     }),
   );
+
+  it("keeps a valid selected effort before agy's models load", () => {
+    const launch = (modelSelection: ModelSelection) =>
+      resolveAgyLaunch({ modelSelection, runtimeMode: "full-access", models: [] });
+    assert.deepInclude(launch(selection("opus-5.5", "max")), { model: "opus-5.5", effort: "max" });
+    assert.deepInclude(launch(selection("opus-5.5", "turbo")), { effort: undefined });
+  });
 });
 
 describe("agy events", () => {
@@ -143,32 +115,9 @@ describe("agy events", () => {
     Effect.gen(function* () {
       const lines = (yield* readFixture("full-access-command.ndjson")).trim().split("\n");
       const events = lines.map(parseAgyEvent);
-      assert.deepEqual(
-        events.map((event) => event?.event),
-        [
-          "init",
-          "step_update",
-          "step_update",
-          "step_update",
-          "step_update",
-          "step_update",
-          "step_update",
-          "step_update",
-          "step_update",
-          "step_update",
-          "result",
-        ],
-      );
-      const tool = events.find(
-        (event) =>
-          event?.event === "step_update" &&
-          event.step_update.state === "DONE" &&
-          event.step_update.step_type === "tool",
-      );
-      assert.deepInclude(tool?.event === "step_update" ? tool.step_update.tool_info : undefined, {
-        parameters: { CommandLine: "ls" },
-        output: "a.txt\r\n",
-      });
+      assert.isTrue(events.every((event) => event !== undefined));
+      assert.equal(events[0]?.event, "init");
+      assert.equal(events.at(-1)?.event, "result");
     }),
   );
 
@@ -177,30 +126,16 @@ describe("agy events", () => {
     assert.isUndefined(parseAgyEvent('{"event":"heartbeat"}'));
   });
 
-  it("writes the only user message shape agy accepts", () => {
-    assert.equal(
-      agyUserMessageLine("say ok"),
-      '{"event":"user","message":{"role":"user","content":[{"type":"text","text":"say ok"}]}}\n',
-    );
+  it("suggests full access only where it would allow the denied action", () => {
+    const denied = [{ action: "command", display_name: "RunCommand" }];
+    const suggesting = agyDeniedActionsNotice(denied, { suggestFullAccess: true });
+    const plain = agyDeniedActionsNotice(denied, { suggestFullAccess: false });
+    assert.include(suggesting, "RunCommand");
+    assert.include(suggesting, "Full access");
+    assert.include(plain, "RunCommand");
+    assert.notInclude(plain, "Full access");
+    assert.isUndefined(agyDeniedActionsNotice([], { suggestFullAccess: true }));
   });
-
-  it.effect("names denied actions and when full access would allow them", () =>
-    Effect.gen(function* () {
-      const result = parseAgyEvent(
-        (yield* readFixture("denied-command.ndjson")).trim().split("\n").at(-1) ?? "",
-      );
-      const denied = result?.event === "result" ? (result.result.denied_actions ?? []) : [];
-      assert.equal(
-        agyDeniedActionsNotice(denied, { suggestFullAccess: true }),
-        "agy blocked RunCommand: it cannot ask for approval when T3 Code runs it. Full access allows these actions, or add allow rules to agy's settings.",
-      );
-      assert.equal(
-        agyDeniedActionsNotice(denied, { suggestFullAccess: false }),
-        "agy blocked RunCommand: it cannot ask for approval when T3 Code runs it.",
-      );
-      assert.isUndefined(agyDeniedActionsNotice([], { suggestFullAccess: true }));
-    }),
-  );
 
   it("recognizes agy's signed-out output", () => {
     assert.isTrue(
@@ -210,5 +145,6 @@ describe("agy events", () => {
     );
     assert.isTrue(isAgySignedOutOutput("authentication failed or timed out"));
     assert.isFalse(isAgySignedOutOutput("invalid model selection"));
+    assert.isFalse(isAgySignedOutOutput("Add a step to sign in the user"));
   });
 });

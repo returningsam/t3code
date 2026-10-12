@@ -22,7 +22,6 @@ import {
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import type { AntigravityCliSettings } from "../settings.ts";
-import { resolveAgyCommand } from "./process.ts";
 import {
   AGY_DEFAULT_MODEL,
   AGY_SIGNED_OUT_MESSAGE,
@@ -33,7 +32,6 @@ import {
 
 const PRESENTATION = {
   displayName: "Antigravity CLI",
-  // In print mode agy approves its own plan and implements it, so T3 Code offers no plan mode.
   showInteractionModeToggle: false,
   supportedRuntimeModes: ["approval-required", "full-access"],
   requiresNewThreadForModelChange: false,
@@ -116,7 +114,7 @@ export const checkAntigravityCliStatus = Effect.fn("checkAntigravityCliStatus")(
       message: "Antigravity CLI is disabled in T3 Code settings.",
     });
   }
-  const command = yield* resolveAgyCommand(settings.binaryPath, environment);
+  const command = settings.binaryPath;
 
   const versionResult = yield* runAgy(command, ["--version"], environment).pipe(
     Effect.timeoutOption(VERSION_TIMEOUT_MS),
@@ -144,19 +142,6 @@ export const checkAntigravityCliStatus = Effect.fn("checkAntigravityCliStatus")(
     Result.isSuccess(modelsResult) && Option.isSome(modelsResult.success)
       ? modelsResult.success.value
       : undefined;
-  if (listed?.code === 0) {
-    return snapshot(
-      settings,
-      checkedAt,
-      {
-        installed: true,
-        version,
-        status: "ready",
-        auth: { status: "authenticated" },
-      },
-      parseAgyModels(listed.stdout),
-    );
-  }
   if (listed !== undefined && isAgySignedOutOutput(`${listed.stdout}\n${listed.stderr}`)) {
     return snapshot(settings, checkedAt, {
       installed: true,
@@ -165,6 +150,15 @@ export const checkAntigravityCliStatus = Effect.fn("checkAntigravityCliStatus")(
       auth: { status: "unauthenticated" },
       message: AGY_SIGNED_OUT_MESSAGE,
     });
+  }
+  const models = listed?.code === 0 ? parseAgyModels(listed.stdout) : [];
+  if (models.length > 0) {
+    return snapshot(
+      settings,
+      checkedAt,
+      { installed: true, version, status: "ready", auth: { status: "authenticated" } },
+      models,
+    );
   }
   return snapshot(settings, checkedAt, {
     installed: true,

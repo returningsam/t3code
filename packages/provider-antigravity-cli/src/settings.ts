@@ -21,7 +21,7 @@ export const AntigravityCliSettings = makeProviderSettingsSchema(
     binaryPath: makeBinaryPathSetting("agy").pipe(
       Schema.annotateKey({
         title: "Binary path",
-        description: "Path to the agy binary. The default also finds ~/.local/bin/agy.",
+        description: "Path to the agy binary.",
         providerSettingsForm: { placeholder: "agy", clearWhenEmpty: "omit" },
       }),
     ),
