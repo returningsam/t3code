@@ -15,15 +15,9 @@ import {
 import type { NativeSyntheticEvent, StyleProp, ViewProps, ViewStyle } from "react-native";
 import { StyleSheet } from "react-native";
 
-import {
-  markdownFileIconSource,
-  markdownIconAssetUri,
-} from "@t3tools/mobile-markdown-text/file-icons";
-import {
-  composerChipSizeSuffix,
-  contextChipPresentation,
-} from "@t3tools/mobile-markdown-text/markdown";
-import { resolveMarkdownFileIcon } from "@t3tools/mobile-markdown-text/links";
+import { markdownFileIconSource, markdownIconAssetUri } from "../lib/markdownFileIcons";
+import { composerChipSizeSuffix, contextChipPresentation } from "../lib/composerChipPresentation";
+import { resolveMarkdownFileIcon } from "../lib/markdownLinks";
 import { useUniwindTheme } from "../lib/useUniwindTheme";
 import { createNativeComposerTheme } from "../lib/nativeComposerTheme";
 import { useFontFamily } from "../lib/useFontFamily";
@@ -84,6 +78,8 @@ interface NativeComposerEditorProps extends ViewProps {
   readonly editable: boolean;
   readonly readOnly: boolean;
   readonly enterBehavior: string;
+  readonly submitTitle: string;
+  readonly alternateSubmitTitle: string;
   readonly scrollEnabled: boolean;
   readonly autoFocus: boolean;
   readonly autoCorrect: boolean;
@@ -102,7 +98,7 @@ interface NativeComposerEditorProps extends ViewProps {
   readonly onComposerPasteText?: (event: NativePasteTextEvent) => void;
   readonly onComposerFocus?: () => void;
   readonly onComposerBlur?: () => void;
-  readonly onComposerSubmit?: () => void;
+  readonly onComposerSubmit?: (event: NativeSyntheticEvent<{ alternate: boolean }>) => void;
 }
 
 const NativeView = requireNativeView<NativeComposerEditorProps>(NATIVE_MODULE_NAME);
@@ -286,6 +282,8 @@ export function ComposerEditor({
       editable={props.editable ?? true}
       readOnly={props.readOnly ?? false}
       enterBehavior={props.enterBehavior ?? DEFAULT_COMPOSER_ENTER_BEHAVIOR}
+      submitTitle={props.submitTitle ?? "Send Message"}
+      alternateSubmitTitle={props.alternateSubmitTitle ?? props.submitTitle ?? "Send Message"}
       scrollEnabled={props.scrollEnabled ?? true}
       autoFocus={props.autoFocus ?? false}
       autoCorrect={props.autoCorrect ?? true}
@@ -357,7 +355,11 @@ export function ComposerEditor({
       }}
       onComposerFocus={onFocus}
       onComposerBlur={onBlur}
-      onComposerSubmit={onSubmit}
+      onComposerSubmit={
+        onSubmit === undefined
+          ? undefined
+          : (event) => onSubmit(event.nativeEvent.alternate === true)
+      }
     />
   );
 }

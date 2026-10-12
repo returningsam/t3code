@@ -308,19 +308,49 @@ export function resolveThreadPullRequestBadge(
   return { kind: "pull-request", others: visible.length - 1, state };
 }
 
-/** Search terms for visible PR links, including the legacy single-link projection. */
+/** Search terms for visible PR links, the legacy projection, and the branch PR. */
 export function threadPullRequestSearchTerms(thread: {
   readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  readonly branchPullRequest?: ThreadLinkedPullRequest | null | undefined;
 }): string[] {
+  const branch = thread.branchPullRequest;
+  const terms = branch
+    ? [`#${branch.number}`, `${branch.repository}#${branch.number}`, branch.url]
+    : [];
   if (thread.pullRequests !== undefined && thread.pullRequests.length > 0) {
-    return visibleThreadPullRequests(thread.pullRequests).flatMap((link) => [
-      `#${link.number}`,
-      `${link.repository}#${link.number}`,
-      link.url,
-      link.snapshot?.title ?? "",
-    ]);
+    return terms.concat(
+      visibleThreadPullRequests(thread.pullRequests).flatMap((link) => [
+        `#${link.number}`,
+        `${link.repository}#${link.number}`,
+        link.url,
+        link.snapshot?.title ?? "",
+      ]),
+    );
   }
   const legacy = thread.linkedPullRequest;
-  return legacy ? [`#${legacy.number}`, `${legacy.repository}#${legacy.number}`, legacy.url] : [];
+  return legacy
+    ? terms.concat([`#${legacy.number}`, `${legacy.repository}#${legacy.number}`, legacy.url])
+    : terms;
+}
+
+/** Older V2 event payloads stored one link; an explicit empty array means it was unlinked. */
+export function threadPullRequestsOf(thread: {
+  readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
+  readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+}): ReadonlyArray<ThreadPullRequestLink> {
+  if (thread.pullRequests !== undefined) return thread.pullRequests;
+  const linked = thread.linkedPullRequest;
+  return linked == null
+    ? []
+    : [
+        {
+          ...legacyThreadPullRequestKey(linked),
+          url: linked.url,
+          source: "manual",
+          linkedAt: "1970-01-01T00:00:00.000Z",
+          snapshot: null,
+          stack: null,
+        },
+      ];
 }

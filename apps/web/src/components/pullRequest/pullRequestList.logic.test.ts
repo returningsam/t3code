@@ -1,7 +1,15 @@
-import type { EnvironmentId, ProjectId, PullRequestListEntry } from "@t3tools/contracts";
+import { SourceControlProviderKind } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  PullRequestAction,
+  PullRequestListEntry,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  pullRequestHostActions,
+  pullRequestQuickActions,
   filterPullRequestsByInvolvement,
   findScopedProject,
   mergePullRequestLists,
@@ -330,7 +338,7 @@ describe("pull request involvement filtering", () => {
       entry({ number: 1, author: { login: "Bilal", name: null, avatarUrl: null } }),
       entry({
         number: 2,
-        provider: "gitlab",
+        provider: SourceControlProviderKind.make("gitlab"),
         host: "gitlab.com",
         author: { login: "Bilal", name: null, avatarUrl: null },
       }),
@@ -1322,7 +1330,7 @@ describe("merging the environments' own listings", () => {
           providers: [
             {
               host: "github.com",
-              kind: "github",
+              kind: SourceControlProviderKind.make("github"),
               searchesOnHost: false,
               projectCount: 2,
               configured: false,
@@ -1650,6 +1658,31 @@ describe("pull request list overrides", () => {
     expect(applyPullRequestOverrides(rows, new Map(), key, "open")).toBe(rows);
   });
 
+  it.each([
+    ["open", [1]],
+    ["closed", [2]],
+    ["merged", [3]],
+    ["all", [1, 2, 3]],
+  ] as const)("filters host rows by %s after pending actions settle", (state, expected) => {
+    const rows = [entry(1, "open"), entry(2, "closed"), entry(3, "merged")];
+    expect(applyPullRequestOverrides(rows, new Map(), key, state).map((row) => row.number)).toEqual(
+      expected,
+    );
+  });
+
+  it("keeps a confirmed close hidden when its override is cleared", () => {
+    const at = 1_000_000;
+    const rows = [entry(1, "closed"), entry(2, "open"), entry(3, "merged")];
+    const overrides = new Map([
+      ["#1", { state: "closed" as const, updatedAt: "2026-07-03T00:00:00Z", token: 1, at }],
+    ]);
+    const settled = settlePullRequestOverrides(overrides, rows, key, at + 5_000);
+    expect(settled.size).toBe(0);
+    expect(applyPullRequestOverrides(rows, settled, key, "open").map((row) => row.number)).toEqual([
+      2,
+    ]);
+  });
+
   it("hands back the held object for a row a refresh did not change", () => {
     const previous = [entry(1, "open"), entry(2, "open")];
     const next = [{ ...entry(1, "open") }, { ...entry(2, "open"), state: "merged" as const }];
@@ -1692,5 +1725,37 @@ describe("pull request list override settlement", () => {
     const swapped = reusePullRequestEntries(previous, [entry(2, "open"), entry(1, "open")], key);
     expect(swapped).not.toBe(previous);
     expect(swapped.map((row) => row.number)).toEqual([2, 1]);
+  });
+});
+
+describe("pull request quick actions", () => {
+  const summary = (host: string, kind: string, actions?: ReadonlyArray<PullRequestAction>) => ({
+    host,
+    kind: SourceControlProviderKind.make(kind),
+    searchesOnHost: true,
+    projectCount: 1,
+    configured: true,
+    detail: null,
+    ...(actions === undefined ? {} : { actions }),
+  });
+
+  it("offers what each host reports, and GitHub's legacy set when a server reports none", () => {
+    const actionsOf = pullRequestHostActions([
+      summary("bitbucket.org", "bitbucket", ["merge", "close"]),
+      summary("github.com", "github"),
+    ]);
+    const bitbucket = actionsOf({
+      host: "bitbucket.org",
+      provider: SourceControlProviderKind.make("bitbucket"),
+    });
+    expect(pullRequestQuickActions({ state: "closed", isDraft: false }, bitbucket)).toEqual([]);
+    const github = actionsOf({
+      host: "github.com",
+      provider: SourceControlProviderKind.make("github"),
+    });
+    expect(pullRequestQuickActions({ state: "open", isDraft: true }, github)).toEqual([
+      "close",
+      "ready",
+    ]);
   });
 });

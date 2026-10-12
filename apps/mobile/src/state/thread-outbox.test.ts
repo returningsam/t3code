@@ -13,9 +13,9 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import { AtomRegistry } from "effect/unstable/reactivity";
-import * as RpcClientError from "effect/unstable/rpc/RpcClientError";
-import * as Socket from "effect/unstable/socket/Socket";
+import { AtomRegistry } from "effect/reactivity";
+import * as RpcClientError from "effect/rpc/RpcClientError";
+import * as Socket from "effect/socket/Socket";
 import { onTestFinished, vi } from "vite-plus/test";
 
 const outboxFiles = vi.hoisted(() => new Map<string, string | Error>());
@@ -135,6 +135,15 @@ describe("thread outbox", () => {
           },
         ],
       },
+    };
+    expect(
+      decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
+    ).toEqual(message);
+  });
+  it("retains queue mode when a queued provider switch reloads from storage", () => {
+    const message: QueuedThreadMessage = {
+      ...queuedMessage({ messageId: "queued-switch", createdAt: "2026-09-17T09:00:00.000Z" }),
+      dispatchMode: "queue",
     };
     expect(
       decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
@@ -1381,7 +1390,7 @@ describe("thread outbox", () => {
     ).toBe("remove");
   });
 
-  it("round-trips queued creations and gates incomplete ones from sending", () => {
+  it("round-trips queued PR checkout sources and gates incomplete creations from sending", () => {
     const base = queuedMessage({
       messageId: "message-1",
       createdAt: "2026-06-08T10:00:01.000Z",
@@ -1395,9 +1404,10 @@ describe("thread outbox", () => {
       creation: {
         projectId: ProjectId.make("project-1"),
         workspaceMode: "worktree",
-        branch: "main",
+        branch: "fork/feature",
         worktreePath: null,
-        startFromOrigin: true,
+        startFromOrigin: false,
+        pullRequestReference: "https://github.com/acme/repo/pull/123",
       },
     } satisfies QueuedThreadMessage;
 
@@ -1421,6 +1431,26 @@ describe("thread outbox", () => {
       false,
     );
     expect(isQueuedThreadCreationSendable(base)).toBe(false);
+    expect(isQueuedThreadCreationSendable({ ...creationMessage, text: "  " })).toBe(false);
+    expect(
+      isQueuedThreadCreationSendable({
+        ...creationMessage,
+        text: "",
+        attachments: [
+          {
+            id: "image-1",
+            type: "image",
+            name: "photo.png",
+            mimeType: "image/png",
+            sizeBytes: 3,
+            fileUri: "file:///documents/t3-composer-attachments/photo.png",
+            previewUri: "file:///documents/t3-composer-attachments/photo.png",
+            uploadedAttachmentId: "pending-photo-png",
+            uploadEnvironmentId: EnvironmentId.make("environment-1"),
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 
   it("retries transport failures but drops deterministic command failures", () => {
