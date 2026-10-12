@@ -173,17 +173,24 @@ export const make = Effect.gen(function* () {
     operation: string,
     cwd: string,
   ) {
-    const handle = yield* registry.resolve({ cwd }).pipe(
+    const handle = yield* registry.detect({ cwd }).pipe(
       Effect.mapError(
         (cause) =>
           new GitManagerError({
             operation,
             cwd,
-            detail: "Failed to resolve the VCS driver for this Git workflow.",
+            detail: "Failed to detect a VCS repository for this Git workflow.",
             cause,
           }),
       ),
     );
+    if (!handle) {
+      return yield* new GitManagerError({
+        operation,
+        cwd,
+        detail: `${cwd} is not a Git repository.`,
+      });
+    }
     if (handle.kind !== "git") {
       return yield* new GitManagerError({
         operation,
@@ -197,18 +204,27 @@ export const make = Effect.gen(function* () {
     operation: string,
     cwd: string,
   ) {
-    const handle = yield* registry.resolve({ cwd }).pipe(
+    const handle = yield* registry.detect({ cwd }).pipe(
       Effect.mapError(
         (cause) =>
           new GitCommandError({
             operation,
             command: "vcs-route",
             cwd,
-            detail: "Failed to resolve the VCS driver for this Git command.",
+            detail: "Failed to detect a VCS repository for this Git command.",
             cause,
           }),
       ),
     );
+    if (!handle) {
+      return yield* new GitCommandError({
+        operation,
+        command: "vcs-route",
+        cwd,
+        reason: "not_a_repository",
+        detail: "This directory is not a Git repository.",
+      });
+    }
     if (handle.kind !== "git") {
       return yield* new GitCommandError({
         operation,

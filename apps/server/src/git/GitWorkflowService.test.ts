@@ -171,6 +171,50 @@ describe("GitWorkflowService", () => {
     ),
   );
 
+  it.effect("rejects a stacked action outside a Git repository", () =>
+    Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow
+        .runStackedAction({ actionId: "action-1", cwd: "/not-a-repo", action: "commit" })
+        .pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitManagerError",
+        operation: "GitWorkflowService.runStackedAction",
+        cwd: "/not-a-repo",
+        detail: "/not-a-repo is not a Git repository.",
+      });
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("rejects a Git command outside a Git repository", () =>
+    Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow.pullCurrentBranch("/not-a-repo").pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitCommandError",
+        operation: "GitWorkflowService.pullCurrentBranch",
+        command: "vcs-route",
+        cwd: "/not-a-repo",
+        reason: "not_a_repository",
+        detail: "This directory is not a Git repository.",
+      });
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+        }),
+      ),
+    ),
+  );
+
   it.effect("structures workflow detection failures without exposing upstream details", () => {
     const cause = new VcsRepositoryDetectionError({
       operation: "VcsDriverRegistry.detect",
@@ -252,7 +296,7 @@ describe("GitWorkflowService", () => {
         GitWorkflowService.layer.pipe(
           Layer.provide(
             Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
-              resolve: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
+              detect: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
             }),
           ),
           Layer.provide(Layer.mock(GitManager.GitManager)({})),
