@@ -173,7 +173,7 @@ export const make = Effect.gen(function* () {
     operation: string,
     cwd: string,
   ) {
-    const handle = yield* registry.resolve({ cwd }).pipe(
+    const handle = yield* registry.detect({ cwd }).pipe(
       Effect.mapError(
         (cause) =>
           new GitManagerError({
@@ -184,6 +184,13 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
+    if (!handle) {
+      return yield* new GitManagerError({
+        operation,
+        cwd,
+        detail: `${cwd} is not a Git repository.`,
+      });
+    }
     if (handle.kind !== "git") {
       return yield* new GitManagerError({
         operation,
@@ -197,7 +204,7 @@ export const make = Effect.gen(function* () {
     operation: string,
     cwd: string,
   ) {
-    const handle = yield* registry.resolve({ cwd }).pipe(
+    const handle = yield* registry.detect({ cwd }).pipe(
       Effect.mapError(
         (cause) =>
           new GitCommandError({
@@ -209,6 +216,14 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
+    if (!handle) {
+      return yield* new GitCommandError({
+        operation,
+        command: "vcs-route",
+        cwd,
+        detail: `${cwd} is not a Git repository.`,
+      });
+    }
     if (handle.kind !== "git") {
       return yield* new GitCommandError({
         operation,
