@@ -174,14 +174,6 @@ export const make = Effect.gen(function* () {
   const isDue = (key: string, entries: ReadonlyArray<LinkEntry>, nowMs: number): boolean => {
     if (requested.has(key) || retryStacks.has(key)) return true;
     if (entries.some((entry) => entry.link.snapshot === null)) return true;
-    // CI usually finishes after the agent has settled, and the sidebar shows its state.
-    if (
-      entries.some(
-        (entry) =>
-          entry.link.snapshot?.state === "open" && entry.link.snapshot.checksState === "pending",
-      )
-    )
-      return true;
     // Settled threads stop watching their pull requests. Unsettling one makes its links due on
     // the next sweep, since the cadence clock below kept running while it was settled.
     const active = entries.filter((entry) => isUnsettled(entry.thread));
