@@ -3,6 +3,8 @@
 T3 Code runs Google's official Antigravity ACP agent on your selected environment.
 It has its own sign-in, separate from the Antigravity IDE or CLI. Google controls
 which models and account access are available through this agent.
+To use an Antigravity CLI (`agy`) that is already signed in on the environment, see
+[Antigravity CLI](./providers-antigravity-cli.md).
 
 ## Set up Antigravity
 
