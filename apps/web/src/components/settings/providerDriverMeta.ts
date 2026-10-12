@@ -5,6 +5,7 @@ import {
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
+import { antigravityCliClient } from "@t3tools/provider-antigravity-cli/client";
 import { makeProviderClientRegistry } from "@t3tools/provider-core/client";
 import { cursorClient } from "@t3tools/provider-cursor/client";
 import { grokClient } from "@t3tools/provider-grok/client";
@@ -32,6 +33,7 @@ export const providerClients = makeProviderClientRegistry([
     label: "Antigravity",
     settingsSchema: AntigravitySettings,
   },
+  antigravityCliClient,
   museClient,
   piClient,
   acpRegistryClient,
