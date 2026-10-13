@@ -7,6 +7,8 @@
  */
 import { TextGenerationError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
@@ -29,6 +31,7 @@ import {
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { AntigravityCliSettings } from "../settings.ts";
 import { ANTIGRAVITY_CLI_PROVIDER, makeAntigravityCliAdapterV2 } from "./adapter.ts";
+import { discoverAgySkills } from "./skills.ts";
 import { buildInitialAntigravityCliSnapshot, checkAntigravityCliStatus } from "./status.ts";
 
 const DRIVER = ANTIGRAVITY_CLI_PROVIDER;
@@ -40,6 +43,8 @@ const MAINTENANCE_CAPABILITIES = makeManualOnlyProviderMaintenanceCapabilities({
 
 export type AntigravityCliDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
   | ProviderHost.ProviderHost;
 
 const unsupportedTextGeneration: ProviderTextGeneration = (() => {
@@ -68,7 +73,14 @@ export const AntigravityCliDriver: ProviderDriver<AntigravityCliSettings, Antigr
     create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const processEnvironment = yield* mergeProviderInstanceEnvironment(environment);
+        const discoverSkills = (cwd: string) =>
+          discoverAgySkills(cwd, processEnvironment).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          );
         const settings = { ...config, enabled } satisfies AntigravityCliSettings;
         const continuationIdentity = defaultProviderContinuationIdentity({
           driverKind: DRIVER,
@@ -113,6 +125,7 @@ export const AntigravityCliDriver: ProviderDriver<AntigravityCliSettings, Antigr
           settings,
           environment: processEnvironment,
           models: snapshot.getSnapshot.pipe(Effect.map((current) => current.models)),
+          discoverSkills,
         });
 
         return {
@@ -123,6 +136,12 @@ export const AntigravityCliDriver: ProviderDriver<AntigravityCliSettings, Antigr
           accentColor,
           enabled,
           snapshot,
+          snapshotForCwd: (cwd: string) =>
+            enabled
+              ? Effect.all([snapshot.getSnapshot, discoverSkills(cwd)]).pipe(
+                  Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
+                )
+              : snapshot.getSnapshot,
           orchestrationAdapter,
           textGeneration: unsupportedTextGeneration,
         } satisfies ProviderInstance;

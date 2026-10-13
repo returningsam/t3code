@@ -23,6 +23,7 @@ import {
   type OrchestrationV2TurnItemStatus,
   type ProviderInstanceId,
   type ServerProviderModel,
+  type ServerProviderSkill,
 } from "@t3tools/contracts";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import type * as Cause from "effect/Cause";
@@ -60,6 +61,7 @@ import {
   type AgyResult,
   type AgyStepUpdate,
 } from "./protocol.ts";
+import { rewriteAgySkillMentions } from "./skills.ts";
 
 export const ANTIGRAVITY_CLI_PROVIDER = ProviderDriverKind.make("antigravityCli");
 const DRIVER = ANTIGRAVITY_CLI_PROVIDER;
@@ -168,6 +170,8 @@ export interface AntigravityCliAdapterOptions {
   readonly environment: NodeJS.ProcessEnv;
   /** The provider's current models, which carry each model's default effort. */
   readonly models: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
+  /** Re-read on every send, since skills change mid-session. */
+  readonly discoverSkills: (cwd: string) => Effect.Effect<ReadonlyArray<ServerProviderSkill>>;
 }
 
 interface LiveProcess {
@@ -866,8 +870,12 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                 if (active !== undefined) {
                   return yield* protocolError("agy already has an active turn");
                 }
+                const skills = yield* options.discoverSkills(cwd);
                 const text = providerMessageTextWithAttachmentPaths({
-                  text: turnInput.message.text,
+                  text: rewriteAgySkillMentions(
+                    turnInput.message.text,
+                    new Set(skills.map((skill) => skill.name)),
+                  ),
                   attachments: turnInput.message.attachments,
                   resolveAttachmentPath: host.resolveAttachmentPath,
                 });

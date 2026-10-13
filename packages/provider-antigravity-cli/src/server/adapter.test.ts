@@ -232,6 +232,10 @@ const makeAdapter = Effect.fnUntraced(function* (fake: FakeAgy) {
     settings: { enabled: true, binaryPath: "/fake/bin/agy", customModels: [] },
     environment: {},
     models: Effect.succeed(models),
+    discoverSkills: () =>
+      Effect.succeed([
+        { name: "herd-review", path: "/skills/herd-review/SKILL.md", enabled: true },
+      ]),
   }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fake.spawner));
 });
 
@@ -405,6 +409,25 @@ describe("AntigravityCliAdapterV2", () => {
       assert.equal(fake.spawns.length, 1);
       assert.isUndefined(flagValue(fake.spawns[0], "--conversation"));
       assert.deepEqual(fake.stdin[0], ["Reply with exactly: ok", "Reply with exactly: two"]);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
+  it.effect("sends skill mentions as the leading slash commands agy expands", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeAgy(yield* readFixture("two-turns.ndjson"));
+      const { runtime, untilTerminal, ensureThread } = yield* openRuntime(fake);
+      const providerThread = yield* ensureThread();
+      yield* startTurn(runtime, providerThread, { text: "$herd-review #12" });
+      yield* untilTerminal;
+      yield* startTurn(runtime, providerThread, {
+        text: "Run $herd-review then echo $HOME",
+        runOrdinal: 2,
+      });
+      yield* untilTerminal;
+      assert.deepEqual(fake.stdin[0], [
+        "/herd-review #12",
+        "/herd-review Run /herd-review then echo $HOME",
+      ]);
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
