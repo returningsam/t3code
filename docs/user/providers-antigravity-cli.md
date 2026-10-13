@@ -26,6 +26,15 @@ tools. Plan mode and rewinding a conversation are unavailable, agents on this pr
 use T3 Code's MCP tools, and this provider does not write commit messages, pull request text,
 or thread titles.
 
+## Skills
+
+The composer lists the skills agy loads: `~/.gemini/config/skills`,
+`~/.gemini/antigravity-cli/skills`, the project's `.gemini/skills`, `.agents/skills`, and
+`.agent/skills`, and the skills of enabled plugins in `~/.gemini/config/plugins`, named
+`<plugin>:<skill>`. See [commands and skills](./composer.md#commands-and-skills) for invoking
+them. agy loads a skill only when its `/name` opens the message, so T3 Code moves the skills you
+pick to the front when it sends.
+
 ## Permissions
 
 agy cannot ask for approval when T3 Code runs it, so the provider offers two
