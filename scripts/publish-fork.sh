@@ -19,6 +19,12 @@ if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
   exit 1
 fi
 
+# Without the public relay config the build ships with T3 Connect turned off.
+if [[ -z "${T3CODE_RELAY_URL:-}" ]] && ! grep -qs '^T3CODE_RELAY_URL=.' .env .env.local; then
+  print -u2 "publish-fork: T3CODE_RELAY_URL is unset, so run cp .env.example .env first"
+  exit 1
+fi
+
 sha=$(git rev-parse --short HEAD)
 version=$(jq -r .version apps/desktop/package.json)
 # Upstream release workflow fires on v*.*.* tags, so fork tags avoid that shape.
