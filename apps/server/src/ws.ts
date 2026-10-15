@@ -538,6 +538,28 @@ function projectFileFailureContext(
   }
 }
 
+const isProjectNotEmptyError = Schema.is(ProjectService.ProjectNotEmptyError);
+const isProjectConflictError = Schema.is(ProjectService.ProjectConflictError);
+const isProjectOperationError = Schema.is(ProjectService.ProjectOperationError);
+const isReadableWorkspaceRootError = Schema.is(
+  Schema.Union([
+    WorkspacePaths.WorkspaceRootNotExistsError,
+    WorkspacePaths.WorkspaceRootNotDirectoryError,
+  ]),
+);
+
+/** Failures the user can fix get a readable message; the rest stay generic. */
+function projectMutationFailureMessage(error: unknown): string {
+  if (isProjectNotEmptyError(error)) return error.message;
+  if (isProjectConflictError(error)) return "This folder already belongs to another project.";
+  if (isProjectOperationError(error) && error.operation === "normalize-workspace") {
+    return isReadableWorkspaceRootError(error.cause)
+      ? error.cause.message
+      : `The folder ${error.workspaceRoot ?? ""} doesn't exist or can't be read.`;
+  }
+  return "Failed to mutate project.";
+}
+
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // Middleware added later wraps middleware added earlier, so instrumentation wraps authorization.
@@ -2690,10 +2712,7 @@ const layerWsRpc = (
               (cause) =>
                 new ProjectMutationError({
                   commandId: mutation.commandId,
-                  message:
-                    cause._tag === "ProjectNotEmptyError"
-                      ? cause.message
-                      : "Failed to mutate project.",
+                  message: projectMutationFailureMessage(cause),
                   cause,
                 }),
             ),

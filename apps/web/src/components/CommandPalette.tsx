@@ -1474,10 +1474,8 @@ function OpenCommandPaletteDialog(props: {
   }
 
   const startAddProjectBrowse = useCallback(
-    async (
-      environmentId: EnvironmentId,
-      initialQuery = getAddProjectInitialQueryForEnvironment(environmentId),
-    ): Promise<void> => {
+    async (environmentId: EnvironmentId): Promise<void> => {
+      const initialQuery = getAddProjectInitialQueryForEnvironment(environmentId);
       const initialBrowsePath = getBrowseDirectoryPath(initialQuery);
       const browseCwd = getBrowseCwdForEnvironment(environmentId);
       const view: CommandPaletteView = {
@@ -1810,14 +1808,17 @@ function OpenCommandPaletteDialog(props: {
     setViewStack([]);
     setFolderPick(pick);
     setAddProjectEnvironmentId(pick.environmentId);
-    void startAddProjectBrowse(
-      pick.environmentId,
-      getFolderPickInitialQuery(
+    // Shown in this commit, without waiting on a prefetch, so the root list
+    // never shows while a pick is pending. The browse query loads the folder.
+    pushPaletteView({
+      addonIcon: <FolderIcon className={ADDON_ICON_CLASS} />,
+      groups: [],
+      initialQuery: getFolderPickInitialQuery(
         pick.currentPath,
         getAddProjectInitialQueryForEnvironment(pick.environmentId),
       ),
-    );
-  }, [clearOpenIntent, getAddProjectInitialQueryForEnvironment, openIntent, startAddProjectBrowse]);
+    });
+  }, [clearOpenIntent, getAddProjectInitialQueryForEnvironment, openIntent, pushPaletteView]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "new-thread-in" || projectThreadItems.length === 0) {
@@ -1827,6 +1828,7 @@ function OpenCommandPaletteDialog(props: {
     browseNavigation.invalidate();
     setAddProjectCloneFlow(null);
     setNewProjectFlow(null);
+    setFolderPick(null);
     setViewStack([]);
     setQuery("");
     // projectThreadItems already lists the current project first.
@@ -2214,6 +2216,7 @@ function OpenCommandPaletteDialog(props: {
     setIsRemoteProjectLookingUp(false);
     setAddProjectCloneFlow(null);
     setNewProjectFlow(null);
+    setFolderPick(null);
     setViewStack([]);
     pushPaletteView({
       addonIcon: <PaletteIcon className={ADDON_ICON_CLASS} />,
@@ -3109,7 +3112,7 @@ function OpenCommandPaletteDialog(props: {
     browseAccessError === null &&
     query.trim().length > 0 &&
     (hasTrailingPathSeparator(query) ? !browseResult : exactBrowseEntry === null);
-  // Unlike adding a project, changing a project's folder never creates one.
+  // Picking a folder accepts only existing folders.
   const isPickedFolderMissing = folderPick !== null && isBrowsePathMissing;
   const canSubmitBrowsePath =
     isBrowsing &&
