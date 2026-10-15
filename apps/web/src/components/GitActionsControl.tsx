@@ -1171,7 +1171,7 @@ export default function GitActionsControl({
   const gitStatusForActions = gitStatus;
   // Matches the diff panel's Changes view. Older servers only report uncommitted totals.
   const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
-  // A folder of repositories lists its changed ones instead of one Changes row.
+  // A folder of repositories also lists its changed ones under the Changes row.
   const nestedRepositoryChanges = isRepo ? undefined : gitStatus?.nestedRepositoryChanges;
   const nestedRows = nestedRepositoryChanges?.length
     ? nestedRepositoryRows(nestedRepositoryChanges)
@@ -1920,43 +1920,7 @@ export default function GitActionsControl({
       )}
 
       {isPanel && canReviewChanges(isRepo, gitStatus) ? (
-        nestedRows ? (
-          <>
-            {nestedRows.rows.map((repository) => (
-              <ThreadDetailsControl
-                key={repository.path}
-                type="button"
-                variant="ghost"
-                size="sm"
-                part="row"
-                aria-label={`Changes in ${repository.path}`}
-                disabled={!onOpenChanges}
-                onClick={() => onOpenChanges?.(repository.path)}
-              >
-                <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-                <MiddleTruncate value={repository.path} variant="cap-aligned" className="flex-1" />
-                {repository.totals ? <ChangeTotals {...repository.totals} /> : null}
-              </ThreadDetailsControl>
-            ))}
-            {nestedRows.moreCount > 0 ? (
-              <ThreadDetailsControl
-                type="button"
-                variant="ghost"
-                size="sm"
-                part="row"
-                tone="muted"
-                disabled={!onOpenChanges}
-                onClick={() => onOpenChanges?.()}
-              >
-                <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-                <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-                  {nestedRows.moreCount} more{" "}
-                  {nestedRows.moreCount === 1 ? "repository" : "repositories"}
-                </span>
-              </ThreadDetailsControl>
-            ) : null}
-          </>
-        ) : (
+        <>
           <ThreadDetailsControl
             type="button"
             variant="ghost"
@@ -1976,7 +1940,49 @@ export default function GitActionsControl({
               />
             ) : null}
           </ThreadDetailsControl>
-        )
+          {nestedRows ? (
+            // Indented so each repository icon lines up under the Changes label.
+            <div className="flex flex-col ps-6.5">
+              {nestedRows.rows.map((repository) => (
+                <ThreadDetailsControl
+                  key={repository.path}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  part="row"
+                  aria-label={`Changes in ${repository.path}`}
+                  disabled={!onOpenChanges}
+                  onClick={() => onOpenChanges?.(repository.path)}
+                >
+                  <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+                  <MiddleTruncate
+                    value={repository.path}
+                    variant="cap-aligned"
+                    className="flex-1"
+                  />
+                  {repository.totals ? <ChangeTotals {...repository.totals} /> : null}
+                </ThreadDetailsControl>
+              ))}
+              {nestedRows.moreCount > 0 ? (
+                <ThreadDetailsControl
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  part="row"
+                  tone="muted"
+                  disabled={!onOpenChanges}
+                  onClick={() => onOpenChanges?.()}
+                >
+                  <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+                  <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+                    {nestedRows.moreCount} more{" "}
+                    {nestedRows.moreCount === 1 ? "repository" : "repositories"}
+                  </span>
+                </ThreadDetailsControl>
+              ) : null}
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       <Dialog
