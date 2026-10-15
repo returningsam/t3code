@@ -13,6 +13,7 @@ import {
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   findHighlightedCommandPaletteItem,
+  getFolderPickInitialQuery,
   reduceCommandPaletteUiState,
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
@@ -272,6 +273,23 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: null,
     });
+  });
+});
+
+describe("getFolderPickInitialQuery", () => {
+  it("opens on the current folder's parent", () => {
+    expect(getFolderPickInitialQuery("/Users/sam/code/app", "~/")).toBe("/Users/sam/code/");
+    expect(getFolderPickInitialQuery("/Users/sam/code/app/", "~/")).toBe("/Users/sam/code/");
+    expect(getFolderPickInitialQuery("C:\\Users\\sam\\app", "~/")).toBe("C:\\Users\\sam\\");
+  });
+
+  it("stays on a root folder, which has no parent", () => {
+    expect(getFolderPickInitialQuery("/", "~/")).toBe("/");
+  });
+
+  it("falls back to the default browse folder without a current folder", () => {
+    expect(getFolderPickInitialQuery(undefined, "~/projects/")).toBe("~/projects/");
+    expect(getFolderPickInitialQuery("  ", "~/projects/")).toBe("~/projects/");
   });
 });
 

@@ -17,6 +17,7 @@ import * as Cause from "effect/Cause";
 import { InfoIcon, Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { openCommandPalette } from "../../commandPaletteBus";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
 import { readLocalApi } from "../../localApi";
@@ -422,6 +423,55 @@ function ProjectDetail({
     ],
   );
 
+  const moveCheckout = useCallback(
+    async (member: SidebarProjectGroupMember, workspaceRoot: string) => {
+      const failureTitle = "Failed to change checkout folder";
+      if (workspaceRoot === member.workspaceRoot) return;
+      if (checkProjectAccess([member], failureTitle)) return;
+      const api = readLocalApi();
+      if (!api) return;
+      const confirmed = await settlePromise(() =>
+        api.dialogs.confirm(
+          [
+            `Change the folder for "${member.title}"?`,
+            `From: ${member.workspaceRoot}`,
+            `To: ${workspaceRoot}`,
+            "Threads that run in the project folder itself will use the new folder.",
+            "Earlier turn diffs may not load if the new folder is a different repository.",
+          ].join("\n"),
+        ),
+      );
+      if (confirmed._tag === "Failure" || !confirmed.value) return;
+      if (checkProjectAccess([member], failureTitle)) return;
+      reportFailure(
+        failureTitle,
+        mapAtomCommandResult(
+          await updateProject({
+            environmentId: member.environmentId,
+            input: { projectId: member.id, workspaceRoot },
+          }),
+          () => undefined,
+        ),
+      );
+    },
+    [checkProjectAccess, reportFailure, updateProject],
+  );
+
+  const changeCheckoutFolder = useCallback(
+    (member: SidebarProjectGroupMember) => {
+      if (checkProjectAccess([member], "Failed to change checkout folder")) return;
+      openCommandPalette({
+        pickFolder: {
+          environmentId: member.environmentId,
+          currentPath: member.workspaceRoot,
+          label: `New folder for ${member.title}`,
+          onPick: (path) => void moveCheckout(member, path),
+        },
+      });
+    },
+    [checkProjectAccess, moveCheckout],
+  );
+
   const checkoutChoices = (
     <SettingsSection title="Checkouts">
       {group.memberProjects.map((member) => (
@@ -430,15 +480,28 @@ function ProjectDetail({
           title={member.environmentLabel ?? "Environment"}
           description={member.workspaceRoot}
           control={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!editableIds.has(member.environmentId)}
-              onClick={() => void removeMembers([member])}
-              aria-label={`Remove checkout ${member.workspaceRoot}`}
-            >
-              Remove
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!editableIds.has(member.environmentId)}
+                onClick={() => changeCheckoutFolder(member)}
+                aria-label={`Change folder of checkout ${member.workspaceRoot}`}
+              >
+                Change…
+              </Button>
+              {hasMultipleCheckouts ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!editableIds.has(member.environmentId)}
+                  onClick={() => void removeMembers([member])}
+                  aria-label={`Remove checkout ${member.workspaceRoot}`}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           }
         />
       ))}
@@ -538,7 +601,7 @@ function ProjectDetail({
         </SettingsSection>
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
-        {hasMultipleCheckouts ? checkoutChoices : null}
+        {checkoutChoices}
         <SettingsSection title="Danger">
           <SettingsRow
             title={

@@ -144,7 +144,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import { type CommandPaletteFolderPick, onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
@@ -190,6 +190,7 @@ import {
   filterPinnedBrowseEntries,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
+  getFolderPickInitialQuery,
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
@@ -499,7 +500,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onOpenCommandPalette((detail) => {
-        if (detail.open === "new-thread-in") {
+        if (detail.pickFolder) {
+          dispatch({ _tag: "OpenPickFolder", pick: detail.pickFolder });
+        } else if (detail.open === "new-thread-in") {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
           openAddProject();
@@ -782,6 +785,8 @@ function OpenCommandPaletteDialog(props: {
   );
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
+  // Set while the browse step picks a folder for its opener instead of adding a project.
+  const [folderPick, setFolderPick] = useState<CommandPaletteFolderPick | null>(null);
   // The name step of New project: while set, the palette input is the name.
   const [newProjectFlow, setNewProjectFlow] = useState<{
     readonly environmentId: EnvironmentId;
@@ -1441,6 +1446,10 @@ function OpenCommandPaletteDialog(props: {
   }
 
   function popView(): void {
+    if (folderPick !== null) {
+      setOpen(false);
+      return;
+    }
     browseNavigation.invalidate();
     setAddProjectCloneFlow(null);
     setNewProjectFlow(null);
@@ -1465,8 +1474,10 @@ function OpenCommandPaletteDialog(props: {
   }
 
   const startAddProjectBrowse = useCallback(
-    async (environmentId: EnvironmentId): Promise<void> => {
-      const initialQuery = getAddProjectInitialQueryForEnvironment(environmentId);
+    async (
+      environmentId: EnvironmentId,
+      initialQuery = getAddProjectInitialQueryForEnvironment(environmentId),
+    ): Promise<void> => {
       const initialBrowsePath = getBrowseDirectoryPath(initialQuery);
       const browseCwd = getBrowseCwdForEnvironment(environmentId);
       const view: CommandPaletteView = {
@@ -1772,6 +1783,7 @@ function OpenCommandPaletteDialog(props: {
     setIsRemoteProjectLookingUp(false);
     setAddProjectCloneFlow(null);
     setNewProjectFlow(null);
+    setFolderPick(null);
     setViewStack([]);
     setLinkedThreadSearch(openIntent);
     setQuery(openIntent.query);
@@ -1783,8 +1795,29 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     clearOpenIntent();
+    setFolderPick(null);
     openAddProjectFlow();
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
+
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "pick-folder") {
+      return;
+    }
+    const { pick } = openIntent;
+    clearOpenIntent();
+    setAddProjectCloneFlow(null);
+    setNewProjectFlow(null);
+    setViewStack([]);
+    setFolderPick(pick);
+    setAddProjectEnvironmentId(pick.environmentId);
+    void startAddProjectBrowse(
+      pick.environmentId,
+      getFolderPickInitialQuery(
+        pick.currentPath,
+        getAddProjectInitialQueryForEnvironment(pick.environmentId),
+      ),
+    );
+  }, [clearOpenIntent, getAddProjectInitialQueryForEnvironment, openIntent, startAddProjectBrowse]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "new-thread-in" || projectThreadItems.length === 0) {
@@ -2490,8 +2523,22 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
+  const completeFolderPick = useCallback(
+    (pick: CommandPaletteFolderPick, rawPath: string) => {
+      const path = resolveProjectPathForDispatch(rawPath, currentProjectCwdForBrowse);
+      if (path.length === 0) return;
+      setOpen(false);
+      pick.onPick(path);
+    },
+    [currentProjectCwdForBrowse, setOpen],
+  );
+
   const handleAddProject = useCallback(
     async (rawCwd: string) => {
+      if (folderPick !== null) {
+        completeFolderPick(folderPick, rawCwd);
+        return;
+      }
       if (!browseEnvironmentId) return;
       await handleAddProjectForEnvironment({
         environmentId: browseEnvironmentId,
@@ -2503,7 +2550,9 @@ function OpenCommandPaletteDialog(props: {
     [
       browseEnvironmentId,
       browseEnvironmentPlatform,
+      completeFolderPick,
       currentProjectCwdForBrowse,
+      folderPick,
       handleAddProjectForEnvironment,
     ],
   );
@@ -3026,7 +3075,13 @@ function OpenCommandPaletteDialog(props: {
   } else if (addProjectCloneFlow?.step === "confirm") {
     displayedGroups = relativePathNeedsActiveProject ? [] : cloneDestinationBrowseGroups;
   } else if (isBrowsing) {
-    displayedGroups = relativePathNeedsActiveProject ? [] : browseGroups;
+    displayedGroups = relativePathNeedsActiveProject
+      ? []
+      : folderPick === null
+        ? browseGroups
+        : browseGroups.map((group) =>
+            group.value === "directories" ? { ...group, label: folderPick.label } : group,
+          );
   }
   const resultRows = buildCommandPaletteRows(displayedGroups);
   const autoHighlightsFirstRow =
@@ -3049,28 +3104,33 @@ function OpenCommandPaletteDialog(props: {
   );
   const canCloneProject = canWriteSourceControl && canCreateClonedProject;
   const isCloneDestinationStep = addProjectCloneFlow?.step === "confirm";
+  const isBrowsePathMissing =
+    !isBrowsePending &&
+    browseAccessError === null &&
+    query.trim().length > 0 &&
+    (hasTrailingPathSeparator(query) ? !browseResult : exactBrowseEntry === null);
+  // Unlike adding a project, changing a project's folder never creates one.
+  const isPickedFolderMissing = folderPick !== null && isBrowsePathMissing;
   const canSubmitBrowsePath =
     isBrowsing &&
     !relativePathNeedsActiveProject &&
+    !isPickedFolderMissing &&
     canCreateProject &&
     (!isCloneDestinationStep || canCloneProject) &&
     canCreateProjectInEnvironment(browseEnvironment?.connection.phase);
   const willCreateProjectPath =
-    canSubmitBrowsePath &&
-    !isBrowsePending &&
-    browseAccessError === null &&
-    query.trim().length > 0 &&
-    !hasHighlightedBrowseItem &&
-    (hasTrailingPathSeparator(query) ? !browseResult : exactBrowseEntry === null);
+    canSubmitBrowsePath && !hasHighlightedBrowseItem && isBrowsePathMissing;
   const useMetaForMod = isMacPlatform(navigator.platform);
   const submitModifierLabel = useMetaForMod ? "\u2318" : "Ctrl";
-  const submitActionLabel = isCloneDestinationStep
-    ? willCreateProjectPath
-      ? "Create & Clone"
-      : "Clone"
-    : willCreateProjectPath
-      ? "Create & Add"
-      : "Add";
+  const submitActionLabel = folderPick
+    ? "Choose"
+    : isCloneDestinationStep
+      ? willCreateProjectPath
+        ? "Create & Clone"
+        : "Clone"
+      : willCreateProjectPath
+        ? "Create & Add"
+        : "Add";
   const addShortcutLabel = hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter";
   const remoteProjectButtonLabel = addProjectCloneFlow
     ? addProjectCloneFlow.source === "url"
@@ -3340,14 +3400,21 @@ function OpenCommandPaletteDialog(props: {
           primaryRunningDistro,
         ),
       );
-      if (!selection) {
+      if (
+        !selection ||
+        (folderPick !== null && selection.environmentId !== folderPick.environmentId)
+      ) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not add WSL project",
+            title: folderPick ? "Could not use WSL folder" : "Could not add WSL project",
             description: "Start the matching WSL backend, then choose the folder again.",
           }),
         );
+        return;
+      }
+      if (folderPick !== null) {
+        completeFolderPick(folderPick, selection.linuxPath);
         return;
       }
       await handleAddProjectForEnvironment({
@@ -3364,9 +3431,11 @@ function OpenCommandPaletteDialog(props: {
     browseEnvironmentId,
     browseEnvironmentPlatform,
     canOpenProjectFromFileManager,
+    completeFolderPick,
     desktopLocalBootstraps,
     environments,
     fileManagerInitialPath,
+    folderPick,
     handleAddProject,
     handleAddProjectForEnvironment,
     isPickingProjectFolder,
@@ -3442,6 +3511,7 @@ function OpenCommandPaletteDialog(props: {
                 !canCreateProject ||
                 !canCreateProjectInEnvironment(browseEnvironment?.connection.phase) ||
                 relativePathNeedsActiveProject ||
+                isPickedFolderMissing ||
                 (isCloneDestinationStep && (!canCloneProject || isRemoteProjectPending))
               }
               onMouseDown={(event) => {
@@ -3615,13 +3685,16 @@ function OpenCommandPaletteDialog(props: {
             ? { emptyStateMessage: "Choose a destination path and press Enter to clone." }
             : relativePathNeedsActiveProject
               ? { emptyStateMessage: "Relative paths require an active project." }
-              : willCreateProjectPath
-                ? {
-                    emptyStateMessage: "Press Enter to create this folder and add it as a project.",
-                  }
-                : threadSearch.isPending
-                  ? { emptyStateMessage: "Searching thread messages…" }
-                  : {})}
+              : isPickedFolderMissing
+                ? { emptyStateMessage: "This folder does not exist." }
+                : willCreateProjectPath
+                  ? {
+                      emptyStateMessage:
+                        "Press Enter to create this folder and add it as a project.",
+                    }
+                  : threadSearch.isPending
+                    ? { emptyStateMessage: "Searching thread messages…" }
+                    : {})}
       />
     </CommandPaletteContent>
   );
