@@ -1153,6 +1153,8 @@ export default function GitActionsControl({
   const SourceControlIcon = sourceControlPresentation.Icon;
   // Default to true while loading so we don't flash init controls.
   const isRepo = gitStatus?.isRepo ?? true;
+  // A folder of repos lists them under Changes; git init over it is rarely wanted.
+  const hideInitializeGit = !isRepo && gitStatus?.hasNestedRepositories === true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const gitStatusForActions = gitStatus;
   // Matches the diff panel's Changes view. Older servers only report uncommitted totals.
@@ -1700,7 +1702,7 @@ export default function GitActionsControl({
   return (
     <>
       {presentation === "menu" ? (
-        !isRepo ? (
+        hideInitializeGit ? null : !isRepo ? (
           <MenuItem
             density={presentation === "menu" ? "touch" : "default"}
 
@@ -1745,7 +1747,7 @@ export default function GitActionsControl({
             </MenuSub>
           </>
         )
-      ) : !isRepo ? (
+      ) : hideInitializeGit ? null : !isRepo ? (
         <ThreadDetailsControl
           size="xs"
           variant={isPanel ? "ghost" : "outline"}
