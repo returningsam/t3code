@@ -82,6 +82,7 @@ import {
 } from "~/components/ui/dialog";
 import { Group, GroupSeparator } from "~/components/ui/group";
 import { Input } from "~/components/ui/input";
+import { MiddleTruncate } from "~/components/ui/middle-truncate";
 import {
   Menu,
   MenuItem,
@@ -1933,14 +1934,7 @@ export default function GitActionsControl({
                 onClick={() => onOpenChanges?.(repository.path)}
               >
                 <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-left",
-                    THREAD_DETAILS_PANEL_LABEL_CLASS,
-                  )}
-                >
-                  {repository.path}
-                </span>
+                <MiddleTruncate value={repository.path} variant="cap-aligned" className="flex-1" />
                 {repository.totals ? <ChangeTotals {...repository.totals} /> : null}
               </ThreadDetailsControl>
             ))}

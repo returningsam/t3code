@@ -16,7 +16,8 @@ export const ReviewDiffPreviewInput = Schema.Struct({
   ),
   /**
    * For a folder of repositories, reviews only these, by folder relative to `cwd`. A path that
-   * is not one of its repositories is ignored. Older servers review them all.
+   * is not one of its repositories is ignored, and an empty list, a `file` request, and older
+   * servers review them all.
    */
   repositories: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
 });

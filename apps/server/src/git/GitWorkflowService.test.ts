@@ -35,7 +35,9 @@ function layer(input: {
     Layer.provide(
       Layer.mock(GitVcsDriver.GitVcsDriver)({
         findNestedRepositories: () => Effect.succeed(input.nestedRepositories ?? []),
-        readNestedChangeTotals: input.readNestedChangeTotals ?? (() => Effect.succeed([])),
+        readNestedChangeTotals:
+          input.readNestedChangeTotals ??
+          (() => Effect.succeed({ totals: { insertions: 0, deletions: 0 }, repositories: [] })),
       }),
     ),
     Layer.provide(
@@ -47,6 +49,12 @@ function layer(input: {
   );
 }
 
+// A folder whose only changed repository is `main`.
+const mainChanges = (insertions: number, deletions: number) => ({
+  totals: { insertions, deletions },
+  repositories: [{ path: "main", totals: { insertions, deletions } }],
+});
+
 // Each read of the nested totals reports its call number, and totals that count the calls.
 const countedNestedChangeTotals = Effect.gen(function* () {
   const calls = yield* Queue.unbounded<number>();
@@ -54,7 +62,7 @@ const countedNestedChangeTotals = Effect.gen(function* () {
   const read: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"] = () =>
     Effect.sync(() => ++count).pipe(
       Effect.tap((call) => Queue.offer(calls, call)),
-      Effect.map((call) => [{ path: "main", totals: { insertions: call, deletions: 0 } }]),
+      Effect.map((call) => mainChanges(call, 0)),
     );
   return { calls, read };
 });
@@ -167,9 +175,7 @@ describe("GitWorkflowService", () => {
 
   it.effect("reuses the totals of nested repositories' edits across status reads", () => {
     const readNestedChangeTotals = vi.fn((cwd: string, repositories: ReadonlyArray<string>) =>
-      Effect.succeed([
-        { path: "main", totals: { insertions: cwd.length, deletions: repositories.length } },
-      ]),
+      Effect.succeed(mainChanges(cwd.length, repositories.length)),
     );
     return Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;
@@ -191,19 +197,22 @@ describe("GitWorkflowService", () => {
     );
   });
 
-  it.effect("reports each nested repository's totals in the review's order with their sum", () => {
-    const changes = [
+  it.effect("reports every changed nested repository in order beside the read ones' sum", () => {
+    const repositories = [
       { path: "worktrees/wt-a", totals: { insertions: 3, deletions: 1 } },
       { path: "main", totals: { insertions: 2, deletions: 0 } },
+      { path: "worktrees/wt-past-the-limit", totals: null },
     ];
-    const readNestedChangeTotals = vi.fn(() => Effect.succeed(changes));
+    const readNestedChangeTotals = vi.fn(() =>
+      Effect.succeed({ totals: { insertions: 5, deletions: 1 }, repositories }),
+    );
     return Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;
       const local = yield* workflow.localStatus({ cwd: "/checkouts" });
       const full = yield* workflow.status({ cwd: "/checkouts" });
 
-      assert.deepStrictEqual(local.nestedRepositoryChanges, changes);
-      assert.deepStrictEqual(full.nestedRepositoryChanges, changes);
+      assert.deepStrictEqual(local.nestedRepositoryChanges, repositories);
+      assert.deepStrictEqual(full.nestedRepositoryChanges, repositories);
       assert.deepStrictEqual(local.branchChanges, { baseRef: null, insertions: 5, deletions: 1 });
       assert.equal(readNestedChangeTotals.mock.calls.length, 1);
     }).pipe(
@@ -218,7 +227,7 @@ describe("GitWorkflowService", () => {
   });
 
   it.effect("keeps a nested repository too large to count but leaves out the sum", () => {
-    const changes = [
+    const repositories = [
       { path: "main", totals: null },
       { path: "worktrees/wt-a", totals: { insertions: 3, deletions: 1 } },
     ];
@@ -226,14 +235,14 @@ describe("GitWorkflowService", () => {
       const workflow = yield* GitWorkflowService.GitWorkflowService;
       const local = yield* workflow.localStatus({ cwd: "/checkouts" });
 
-      assert.deepStrictEqual(local.nestedRepositoryChanges, changes);
+      assert.deepStrictEqual(local.nestedRepositoryChanges, repositories);
       assert.isUndefined(local.branchChanges);
     }).pipe(
       Effect.provide(
         layer({
           detect: () => Effect.succeed(null),
           nestedRepositories: ["main", "worktrees/wt-a"],
-          readNestedChangeTotals: () => Effect.succeed(changes),
+          readNestedChangeTotals: () => Effect.succeed({ totals: null, repositories }),
         }),
       ),
     );
@@ -279,12 +288,9 @@ describe("GitWorkflowService", () => {
       let calls = 0;
       const readNestedChangeTotals = vi.fn(() => {
         calls += 1;
-        const changes = (insertions: number) => [
-          { path: "main", totals: { insertions, deletions: 0 } },
-        ];
         return calls === 1
-          ? Effect.succeed(changes(1))
-          : Deferred.await(gate).pipe(Effect.as(changes(2)));
+          ? Effect.succeed(mainChanges(1, 0))
+          : Deferred.await(gate).pipe(Effect.as(mainChanges(2, 0)));
       });
       yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
@@ -337,9 +343,7 @@ describe("GitWorkflowService", () => {
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
       const readNestedChangeTotals = vi.fn(() =>
-        Deferred.await(gate).pipe(
-          Effect.as([{ path: "main", totals: { insertions: 3, deletions: 1 } }]),
-        ),
+        Deferred.await(gate).pipe(Effect.as(mainChanges(3, 1))),
       );
       yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;

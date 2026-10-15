@@ -1,4 +1,4 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, RunId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
@@ -9,6 +9,7 @@ import {
 } from "./diffPanelStore";
 
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
+const THREAD_KEY = scopedThreadKey(THREAD_REF);
 
 describe("diffPanelStore", () => {
   beforeEach(() =>
@@ -147,11 +148,23 @@ describe("diffPanelStore", () => {
 
     store.reconcileNestedRepositories(THREAD_REF, ["worktrees/wt-b"]);
     expect(picked()).toEqual([]);
+    expect(THREAD_KEY in useDiffPanelStore.getState().nestedRepositoriesByThreadKey).toBe(false);
     expect(
       selectThreadNestedRepositories(
         useDiffPanelStore.getState().nestedRepositoriesByThreadKey,
         otherThreadRef,
       ),
     ).toEqual(["main"]);
+  });
+
+  it("clears a thread's picked nested repositories when it shows them all or is removed", () => {
+    const store = useDiffPanelStore.getState();
+    store.selectNestedRepositories(THREAD_REF, ["main"]);
+    store.selectNestedRepositories(THREAD_REF, []);
+    expect(THREAD_KEY in useDiffPanelStore.getState().nestedRepositoriesByThreadKey).toBe(false);
+
+    store.selectNestedRepositories(THREAD_REF, ["main"]);
+    store.removeThread(THREAD_REF);
+    expect(THREAD_KEY in useDiffPanelStore.getState().nestedRepositoriesByThreadKey).toBe(false);
   });
 });

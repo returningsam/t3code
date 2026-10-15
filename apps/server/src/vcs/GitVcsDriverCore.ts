@@ -3398,20 +3398,37 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     return {
       reviews: reviews.filter((review): review is NestedReview => review !== null),
+      changed,
       changedCount: changed.length,
     };
   });
 
   const readNestedChangeTotals: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"] =
     Effect.fn("readNestedChangeTotals")(function* (root, repositories) {
-      const { reviews } = yield* openChangedNestedReviews(root, repositories, {
+      const { reviews, changed } = yield* openChangedNestedReviews(root, repositories, {
         diffArgs: REVIEW_DIFF_ARGS,
         patchLimit: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
       });
-      return reviews.map((review) => ({
-        path: review.relativePath,
-        totals: review.files === undefined ? null : sumReviewFileStats(review.files),
-      }));
+      const read = new Map(reviews.map((review) => [review.relativePath, review.files]));
+      const files = [...read.values()];
+      return {
+        totals: files.includes(undefined)
+          ? null
+          : sumReviewFileStats(files.flatMap((part) => part ?? [])),
+        // One the review could not read is left out, as it is from the review.
+        repositories: changed
+          .filter(
+            (relativePath, index) =>
+              index >= REVIEW_NESTED_REPOSITORY_MAX || read.has(relativePath),
+          )
+          .map((relativePath) => {
+            const repositoryFiles = read.get(relativePath);
+            return {
+              path: relativePath,
+              totals: repositoryFiles ? sumReviewFileStats(repositoryFiles) : null,
+            };
+          }),
+      };
     }, Effect.scoped);
 
   /**
@@ -3438,7 +3455,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       } else {
         const found = yield* findNestedRepositories(input.cwd);
         // Only the folder's own repositories can be picked, so no request reaches outside it.
-        const picked = input.repositories ? new Set(input.repositories) : null;
+        const picked = input.repositories?.length ? new Set(input.repositories) : null;
         const relativePaths = picked
           ? found.filter((relativePath) => picked.has(relativePath))
           : found;

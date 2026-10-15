@@ -2430,6 +2430,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         }
         const unknown = yield* driver.getReviewDiffPreview({ cwd: root, repositories: [outside] });
         assert.deepStrictEqual(unknown.sources, []);
+        const all = yield* driver.getReviewDiffPreview({ cwd: root, repositories: [] });
+        assert.lengthOf(sourceOf(all, "working-tree").files ?? [], 3);
       }),
     );
 
@@ -2464,11 +2466,14 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isUndefined(source.nestedRepositories);
         assert.deepStrictEqual(
           yield* driver.readNestedChangeTotals(root, yield* driver.findNestedRepositories(root)),
-          [
-            { path: "c-added", totals: { insertions: 1, deletions: 0 } },
-            { path: "d-deleted", totals: { insertions: 0, deletions: 1 } },
-            { path: "a-edited", totals: { insertions: 1, deletions: 1 } },
-          ],
+          {
+            totals: { insertions: 2, deletions: 2 },
+            repositories: [
+              { path: "c-added", totals: { insertions: 1, deletions: 0 } },
+              { path: "d-deleted", totals: { insertions: 0, deletions: 1 } },
+              { path: "a-edited", totals: { insertions: 1, deletions: 1 } },
+            ],
+          },
         );
       }),
     );
@@ -2566,7 +2571,19 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         }
         assert.deepStrictEqual(
           yield* driver.readNestedChangeTotals(root, yield* driver.findNestedRepositories(root)),
-          shown.map((path) => ({ path, totals: { insertions: 1, deletions: 1 } })),
+          {
+            totals: { insertions: 32, deletions: 32 },
+            repositories: [
+              ...shown.map((path) => ({ path, totals: { insertions: 1, deletions: 1 } })),
+              { path: "repo-00", totals: null },
+            ],
+          },
+        );
+        // A repository past the limit still opens when picked.
+        const picked = yield* driver.getReviewDiffPreview({ cwd: root, repositories: ["repo-00"] });
+        assert.deepStrictEqual(
+          sourceOf(picked, "working-tree").files?.map((file) => file.path),
+          ["repo-00/README.md"],
         );
       }),
     );
@@ -2782,10 +2799,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isTrue(source.truncated);
         assert.include(source.diff, "+# one edit");
         assert.include(source.diff, "+# two edit");
+        const changes = yield* driver.readNestedChangeTotals(root, ["one", "two"]);
+        assert.isNull(changes.totals);
         assert.deepStrictEqual(
-          (yield* driver.readNestedChangeTotals(root, ["one", "two"])).toSorted((left, right) =>
-            left.path.localeCompare(right.path),
-          ),
+          changes.repositories.toSorted((left, right) => left.path.localeCompare(right.path)),
           [
             { path: "one", totals: null },
             { path: "two", totals: { insertions: 1, deletions: 1 } },

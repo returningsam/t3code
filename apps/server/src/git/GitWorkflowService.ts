@@ -19,7 +19,6 @@ import {
   type VcsCreateWorktreeResult,
   type VcsListRefsInput,
   type VcsListRefsResult,
-  type VcsNestedRepositoryChanges,
   type GitManagerServiceError,
   type GitPreparePullRequestThreadInput,
   type GitPreparePullRequestThreadResult,
@@ -146,27 +145,13 @@ const NESTED_REPOSITORY_SCAN_CACHE_CAPACITY = 256;
 const NESTED_CHANGE_TOTALS_TTL = Duration.seconds(30);
 const NESTED_CHANGE_TOTALS_WAIT = Duration.seconds(2);
 
-type NestedChanges = ReadonlyArray<VcsNestedRepositoryChanges>;
-
 interface NestedRepositories {
   /** Null until a read finishes. */
-  readonly changes: NestedChanges | null;
-}
-
-// Null when one repository has too many untracked files to count.
-function sumNestedChanges(changes: NestedChanges) {
-  let insertions = 0;
-  let deletions = 0;
-  for (const { totals } of changes) {
-    if (totals === null) return null;
-    insertions += totals.insertions;
-    deletions += totals.deletions;
-  }
-  return { insertions, deletions };
+  readonly changes: GitVcsDriver.NestedChangeTotals | null;
 }
 
 function nonRepositoryLocalStatus(nested: NestedRepositories | null): VcsStatusLocalResult {
-  const totals = nested?.changes ? sumNestedChanges(nested.changes) : null;
+  const totals = nested?.changes?.totals;
   return {
     isRepo: false,
     hasPrimaryRemote: false,
@@ -180,7 +165,7 @@ function nonRepositoryLocalStatus(nested: NestedRepositories | null): VcsStatusL
     },
     ...(totals ? { branchChanges: { baseRef: null, ...totals } } : {}),
     ...(nested ? { hasNestedRepositories: true } : {}),
-    ...(nested?.changes ? { nestedRepositoryChanges: nested.changes } : {}),
+    ...(nested?.changes ? { nestedRepositoryChanges: nested.changes.repositories } : {}),
   };
 }
 
@@ -226,7 +211,7 @@ export const make = Effect.gen(function* () {
   const backgroundScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
     Scope.close(scope, Exit.void),
   );
-  const latestNestedChangeTotals = new Map<string, NestedChanges>();
+  const latestNestedChangeTotals = new Map<string, GitVcsDriver.NestedChangeTotals>();
   const nestedChangeTotalsCache = yield* Cache.makeWith(
     (cwd: string) =>
       Cache.get(nestedRepositoriesCache, cwd).pipe(

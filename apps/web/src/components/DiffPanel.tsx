@@ -67,6 +67,7 @@ import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/Ann
 import { DiffFileTree } from "./diffs/DiffFileTree";
 import { diffFileTreeEntries } from "./diffs/diffFileTree.logic";
 import { Button } from "./ui/button";
+import { MiddleTruncate } from "./ui/middle-truncate";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
@@ -107,6 +108,7 @@ import { DiffFileStatus } from "./diffs/DiffFileStatus";
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
 const DIFF_FILE_TREE_STORAGE_KEY = "t3code.diffFileTreeOpen";
+const byPath = (left: string, right: string) => left.localeCompare(right);
 const fileEntryCache = new WeakMap<
   FileDiffMetadata,
   { fileDiff: FileDiffMetadata; fileKey: string; fileVersion: number }
@@ -282,17 +284,27 @@ export default function DiffPanel({
     [nestedRepositoryChanges],
   );
   // The review covers every repository until status lists the changed ones to pick from.
+  // Sorted, so the order of picks does not make separate review queries.
   const selectedNestedRepositories = useMemo(
     () =>
       nestedRepositoryPaths
-        ? reconcileNestedRepositorySelection(pickedNestedRepositories, nestedRepositoryPaths)
+        ? reconcileNestedRepositorySelection(
+            pickedNestedRepositories,
+            nestedRepositoryPaths,
+          ).toSorted(byPath)
         : [],
     [nestedRepositoryPaths, pickedNestedRepositories],
   );
+  // By path, so items stay put while edits reorder the repositories.
+  const nestedRepositoryMenuPaths = useMemo(
+    () => nestedRepositoryPaths?.toSorted(byPath) ?? [],
+    [nestedRepositoryPaths],
+  );
+  const hasPickedNestedRepositories = pickedNestedRepositories.length > 0;
   useEffect(() => {
-    if (!routeThreadRef || !nestedRepositoryPaths) return;
+    if (!routeThreadRef || !nestedRepositoryPaths || !hasPickedNestedRepositories) return;
     useDiffPanelStore.getState().reconcileNestedRepositories(routeThreadRef, nestedRepositoryPaths);
-  }, [nestedRepositoryPaths, routeThreadRef]);
+  }, [hasPickedNestedRepositories, nestedRepositoryPaths, routeThreadRef]);
   const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
     useTurnDiffSummaries(activeThreadProjection);
   const orderedTurnDiffSummaries = useMemo(
@@ -839,14 +851,14 @@ export default function DiffPanel({
             </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
-        {selectedRunId === null && nestedRepositoryPaths && nestedRepositoryPaths.length > 0 ? (
+        {selectedRunId === null && nestedRepositoryMenuPaths.length > 1 ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button size="xs" variant="ghost-muted" />}
               className="min-w-0 max-w-48"
               aria-label={`Repositories: ${nestedRepositoriesLabel}`}
             >
-              <span className="min-w-0 truncate">{nestedRepositoriesLabel}</span>
+              <MiddleTruncate value={nestedRepositoriesLabel} />
               <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
@@ -857,7 +869,7 @@ export default function DiffPanel({
                 All repositories
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
-              {nestedRepositoryPaths.map((path) => (
+              {nestedRepositoryMenuPaths.map((path) => (
                 <DropdownMenuCheckboxItem
                   key={path}
                   checked={selectedNestedRepositories.includes(path)}
@@ -865,7 +877,7 @@ export default function DiffPanel({
                     selectNestedRepositories(
                       toggleNestedRepository(
                         selectedNestedRepositories,
-                        nestedRepositoryPaths,
+                        nestedRepositoryMenuPaths,
                         path,
                       ),
                     )

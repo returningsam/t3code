@@ -18,9 +18,9 @@ repository's folder. A submodule whose checked-out commit moved shows everything
 the project records for it. A project folder that is not a git repository itself, such as one
 holding a main checkout and its worktrees, lists the uncommitted edits of the repositories one or
 two folders below it, the most recently edited first, up to 32 of them. The thread details panel
-lists the five most recently edited with their totals. Click one to review only that repository,
-or pick several from the repository menu beside **Changes** in the diff panel. Turn diffs still
-need the project folder to be a git repository.
+lists the changed repositories with their totals. Click one to review only that repository, or
+pick several from the repository menu beside the diff panel's scope menu. Turn diffs still need
+the project folder to be a git repository.
 
 ## Connect an account
 
