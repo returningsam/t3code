@@ -115,6 +115,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "~/state/vcs";
 import { randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+import { canReviewChanges } from "@t3tools/shared/git";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
@@ -1899,7 +1900,7 @@ export default function GitActionsControl({
         </ActionGroup>
       )}
 
-      {isPanel && (isRepo || gitStatus?.hasNestedRepositories) ? (
+      {isPanel && canReviewChanges(isRepo, gitStatus) ? (
         <ThreadDetailsControl
           type="button"
           variant="ghost"
@@ -1910,7 +1911,6 @@ export default function GitActionsControl({
         >
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
           <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>Changes</span>
-          {/* Status has no totals for the repositories below a folder that is not one. */}
           {isRepo ? (
             <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
               <span className="text-success">

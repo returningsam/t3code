@@ -25,6 +25,7 @@ import {
   projectScriptMenuIcon,
   type TerminalMenuSession,
 } from "../terminal/terminalMenu";
+import { canReviewChanges } from "@t3tools/shared/git";
 import { projectScriptMenuLabel } from "@t3tools/shared/projectScripts";
 
 function truncateMiddle(value: string, maxLength: number): string {
@@ -127,8 +128,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
   const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? "Detached HEAD";
   const busy = gitOperationLabel !== null;
   const isRepo = gitStatus?.isRepo ?? true;
-  // A folder that is not a repository still reviews the repositories below it.
-  const canReview = isRepo || gitStatus?.hasNestedRepositories === true;
+  const canReview = canReviewChanges(isRepo, gitStatus);
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus?.isDefaultRef ?? false;
 

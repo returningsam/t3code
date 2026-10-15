@@ -127,7 +127,6 @@ export const make = Effect.gen(function* () {
     yield* assertWorkspaceBoundCwd("ReviewService.getDiffPreview", input.cwd);
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
-    // A folder that is not a repository can still review the git repositories below it.
     if (!handle) {
       return yield* git.getReviewDiffPreview(input);
     }

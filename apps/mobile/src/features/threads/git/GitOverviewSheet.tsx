@@ -5,6 +5,7 @@ import {
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
+import { canReviewChanges } from "@t3tools/shared/git";
 import {
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
@@ -109,8 +110,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const gitOperationLabel = gitState.gitOperationLabel;
   const busy = gitOperationLabel !== null;
   const isRepo = gitStatus.data?.isRepo ?? true;
-  // A folder that is not a repository still reviews the repositories below it.
-  const canReview = isRepo || gitStatus.data?.hasNestedRepositories === true;
+  const canReview = canReviewChanges(isRepo, gitStatus.data);
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
 

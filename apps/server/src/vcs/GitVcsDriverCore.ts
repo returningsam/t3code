@@ -42,7 +42,7 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
-import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
+import { isFilesystemRoot, resolveWorktreesDirectory } from "../worktreesDirectory.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -73,8 +73,16 @@ const REVIEW_UNTRACKED_MAX_FILES = 5_000;
 const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 // Nested repositories in a review are read a few at a time, each with several git processes.
 const REVIEW_NESTED_REPOSITORY_CONCURRENCY = 4;
+// A review reads at most this many nested repositories. A folder with more is incomplete.
+const REVIEW_NESTED_REPOSITORY_MAX = 32;
 // Finding the repositories below a non-repository folder checks at most this many entries.
 const NESTED_REPOSITORY_SCAN_MAX_ENTRIES = 500;
+// Clients name review paths, so finding the repository that owns one stops at these bounds.
+const NESTED_REPOSITORY_PATH_MAX_BYTES = 4096;
+const NESTED_REPOSITORY_PATH_MAX_SEGMENTS = 64;
+// A nested repository's config can name an fsmonitor command, which reads of its working tree
+// would run.
+const NESTED_REPOSITORY_GIT_CONFIG = ["-c", "core.fsmonitor=false"] as const;
 // Patches the clients render are parsed against git's default a/ and b/ path
 // prefixes. A repository or global diff.noprefix or diff.mnemonicPrefix would
 // otherwise leak into the patch and leave every parsed file unnamed.
@@ -264,12 +272,25 @@ interface ReviewDiffRead {
 
 interface ReviewPatch {
   readonly stdout: string;
+  /** True only when the patch text was cut at its byte limit. */
   readonly stdoutTruncated: boolean;
-  /** Undefined when there were too many untracked files to list. */
+  /** Undefined when the totals are incomplete, such as with too many untracked files to list. */
   readonly files: ReadonlyArray<ReviewDiffFileStat> | undefined;
 }
 
 const EMPTY_REVIEW_PATCH: ReviewPatch = { stdout: "", stdoutTruncated: false, files: [] };
+
+interface NestedReview {
+  readonly files: ReadonlyArray<ReviewDiffFileStat> | undefined;
+  /** Reads the prefixed patch once, however many sources show it. Null with no changes. */
+  readonly patch: Effect.Effect<
+    { readonly stdout: string; readonly stdoutTruncated: boolean },
+    GitCommandError
+  > | null;
+}
+
+const utf8Encoder = new TextEncoder();
+const utf8ByteLength = (text: string) => utf8Encoder.encode(text).byteLength;
 
 // Git quotes a path holding one of these. A nested repository's folder with one would break
 // the prefixed patch headers, so it is not expanded.
@@ -295,18 +316,20 @@ function parseReviewRawNumstat(stdout: string) {
 }
 
 // Joins patches in order into one output capped at `maxBytes`, like a single truncated git read.
-function joinReviewPatches(
-  patches: ReadonlyArray<{ readonly stdout: string; readonly stdoutTruncated: boolean }>,
-  maxBytes: number,
-) {
+// A cut drops the patch text after it, while the totals stay complete unless a part's are not.
+function joinReviewPatches(patches: ReadonlyArray<ReviewPatch>, maxBytes: number): ReviewPatch {
   const cut = patches.findIndex((patch) => patch.stdoutTruncated);
   const stdout = (cut < 0 ? patches : patches.slice(0, cut + 1))
     .map((patch) => patch.stdout)
     .join("");
-  const bytes = new TextEncoder().encode(stdout);
-  return bytes.byteLength <= maxBytes
-    ? { stdout, stdoutTruncated: cut >= 0 }
-    : { stdout: new TextDecoder().decode(bytes.subarray(0, maxBytes)), stdoutTruncated: true };
+  const files = patches.map((patch) => patch.files);
+  const bytes = utf8Encoder.encode(stdout);
+  return {
+    ...(bytes.byteLength <= maxBytes
+      ? { stdout, stdoutTruncated: cut >= 0 }
+      : { stdout: new TextDecoder().decode(bytes.subarray(0, maxBytes)), stdoutTruncated: true }),
+    files: files.includes(undefined) ? undefined : files.flatMap((part) => part ?? []),
+  };
 }
 
 function parsePorcelainPath(line: string): string | null {
@@ -2706,13 +2729,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const prepareReviewIndex = Effect.fn("prepareReviewIndex")(function* (
     cwd: string,
     untrackedPaths: ReadonlyArray<string>,
+    gitConfig: ReadonlyArray<string>,
   ) {
     const [stagedDeletionsStdout, indexValue] = yield* Effect.all(
       [
         runGitStdoutWithOptions(
           "GitVcsDriver.readUnifiedWorkingTreeReviewDiff.stagedDeletions",
           cwd,
-          ["diff", "--cached", "--name-only", "--diff-filter=D", "-z", "HEAD", "--"],
+          [...gitConfig, "diff", "--cached", "--name-only", "--diff-filter=D", "-z", "HEAD", "--"],
           { allowNonZeroExit: true, maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
         ),
         runGitStdout("GitVcsDriver.readUnifiedWorkingTreeReviewDiff.indexPath", cwd, [
@@ -2746,13 +2770,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     const env = { GIT_INDEX_FILE: tempIndexPath } satisfies NodeJS.ProcessEnv;
     const tempIndexConfig = [
+      ...gitConfig,
       "-c",
       "core.splitIndex=false",
       "-c",
       "splitIndex.sharedIndexExpire=never",
     ];
     if (!indexExists) {
-      yield* executeGit("GitVcsDriver.review.emptyIndex", cwd, ["read-tree", "--empty"], { env });
+      yield* executeGit(
+        "GitVcsDriver.review.emptyIndex",
+        cwd,
+        [...gitConfig, "read-tree", "--empty"],
+        { env },
+      );
     }
     yield* executeGit(
       "GitVcsDriver.readUnifiedWorkingTreeReviewDiff.expandSplitIndex",
@@ -2793,11 +2823,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     cwd: string,
     pathArgs: ReadonlyArray<string>,
     onlyPath?: string,
+    gitConfig: ReadonlyArray<string> = [],
   ) {
     const untracked = yield* executeGit(
       "GitVcsDriver.review.listUntracked",
       cwd,
-      ["ls-files", "--others", "--exclude-standard", "-z", "--", ...pathArgs],
+      [...gitConfig, "ls-files", "--others", "--exclude-standard", "-z", "--", ...pathArgs],
       { maxOutputBytes: REVIEW_METADATA_MAX_OUTPUT_BYTES },
     ).pipe(
       Effect.catchIf(
@@ -2811,7 +2842,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     if (paths.length === 0) return { env: undefined };
     if (paths.length > REVIEW_UNTRACKED_MAX_FILES) return null;
-    const env = yield* prepareReviewIndex(cwd, paths).pipe(
+    const env = yield* prepareReviewIndex(cwd, paths, gitConfig).pipe(
       Effect.catchTags({
         PlatformError: (cause) =>
           Effect.fail(
@@ -2938,6 +2969,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const findNestedRepositories: GitVcsDriver.GitVcsDriver["Service"]["findNestedRepositories"] =
     Effect.fn("findNestedRepositories")(function* (root) {
+      const resolvedRoot = path.resolve(root);
+      // A home folder or filesystem root holds too much to scan, and on macOS reading folders
+      // such as Documents in it prompts for access.
+      if (
+        resolvedRoot === path.resolve(yield* HostProcess.HomeDirectory) ||
+        isFilesystemRoot(resolvedRoot, path)
+      ) {
+        return [];
+      }
       const listEntries = (relativePath: string | null) =>
         fileSystem.readDirectory(relativePath === null ? root : path.join(root, relativePath)).pipe(
           Effect.map((names) =>
@@ -2958,9 +2998,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const topEntries = (yield* listEntries(null)).slice(0, NESTED_REPOSITORY_SCAN_MAX_ENTRIES);
       const top = yield* partition(topEntries);
       // The scan does not enter a repository: its folders belong to its own diff.
-      const childEntries = (yield* Effect.forEach(top.others, listEntries, { concurrency: 8 }))
-        .flat()
-        .slice(0, NESTED_REPOSITORY_SCAN_MAX_ENTRIES - topEntries.length);
+      const childEntries: string[] = [];
+      for (const folder of top.others) {
+        const remaining =
+          NESTED_REPOSITORY_SCAN_MAX_ENTRIES - topEntries.length - childEntries.length;
+        if (remaining <= 0) break;
+        childEntries.push(...(yield* listEntries(folder)).slice(0, remaining));
+      }
       const children = yield* partition(childEntries);
       const repositories = [...top.repositories, ...children.repositories];
       const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
@@ -2972,18 +3016,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       return repositories.filter((_, index) => isInside[index]).toSorted();
     });
 
-  // The shallowest folder above `filePath` with a `.git` entry, below `root`. Null for a file
-  // of the root's own repository.
+  // The shallowest folder above `filePath` with a `.git` entry, below `root`. Null for a file of
+  // the root's own repository, and for a path past the bounds or through a missing folder.
   const findOwningNestedRepository = Effect.fn("findOwningNestedRepository")(function* (
     root: string,
     filePath: string,
   ) {
     const segments = filePath.split("/");
-    if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    if (
+      segments.length > NESTED_REPOSITORY_PATH_MAX_SEGMENTS ||
+      utf8ByteLength(filePath) > NESTED_REPOSITORY_PATH_MAX_BYTES ||
+      segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ) {
       return null;
     }
-    for (let depth = 1; depth < segments.length; depth++) {
-      const relativePath = segments.slice(0, depth).join("/");
+    let relativePath = "";
+    for (const segment of segments.slice(0, -1)) {
+      relativePath = relativePath === "" ? segment : `${relativePath}/${segment}`;
+      const info = yield* fileSystem.stat(path.join(root, relativePath)).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "Directory") return null;
       if (!(yield* hasGitEntry(root, relativePath))) continue;
       const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
       return (yield* isWithinRealRoot(realRoot, root, relativePath)) ? relativePath : null;
@@ -2991,20 +3042,32 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return null;
   });
 
-  // The commit `revision` pins at the gitlink `relativePath`, or null when it pins none there.
-  const readGitlinkCommit = Effect.fn("readGitlinkCommit")(function* (
-    cwd: string,
+  // In a repository, a folder with its own `.git` is reviewed as a nested repository when it is
+  // a gitlink at `revision`, whose commit is the old side, or a folder the index tracks nothing
+  // under. Null for a tracked folder that also holds a `.git`, such as a test fixture.
+  const readNestedReviewBase = Effect.fn("readNestedReviewBase")(function* (
+    root: string,
     revision: string,
     relativePath: string,
   ) {
-    const result = yield* executeGit(
+    const tree = yield* executeGit(
       "GitVcsDriver.review.gitlinkCommit",
-      cwd,
+      root,
       ["--literal-pathspecs", "ls-tree", "-z", revision, "--", relativePath],
       { allowNonZeroExit: true },
     );
-    const match = /^160000 commit ([0-9a-f]+)\t/.exec(result.stdout);
-    return result.exitCode === 0 && match ? match[1]! : null;
+    if (tree.exitCode === 0 && tree.stdout.length > 0) {
+      const match = /^160000 commit ([0-9a-f]+)\t/.exec(tree.stdout);
+      return match ? { oldCommit: match[1]! } : null;
+    }
+    // A gitlink sorts before the paths under its folder, so the first entry decides.
+    const index = yield* executeGit(
+      "GitVcsDriver.review.trackedInFolder",
+      root,
+      ["--literal-pathspecs", "ls-files", "-z", "--", relativePath],
+      { maxOutputBytes: 4096, appendTruncationMarker: true },
+    );
+    return index.stdout.startsWith(`${relativePath}/`) ? null : { oldCommit: null };
   });
 
   // Raw records name the gitlinks, which numstat lines cannot tell apart from files.
@@ -3012,7 +3075,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     read: ReviewDiffRead,
     ref: string,
   ) {
-    const args = [...read.diffArgs, "--raw", "--no-abbrev", "--numstat", "-z"];
+    // Git's default skips a submodule whose only changes are untracked files.
+    const args = [
+      ...read.diffArgs,
+      "--ignore-submodules=none",
+      "--raw",
+      "--no-abbrev",
+      "--numstat",
+      "-z",
+    ];
     const result = yield* executeGit(
       "GitVcsDriver.getReviewDiffPreview.stat",
       read.cwd,
@@ -3040,12 +3111,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   // One commit argument diffs that commit against the working tree.
-  const readReviewPatch = (
+  const readReviewPatch = Effect.fn("GitVcsDriver.getReviewDiffPreview.patch")(function* (
     read: ReviewDiffRead,
     ref: string,
     options: { readonly prefix?: string; readonly excludePaths?: ReadonlyArray<string> } = {},
-  ) =>
-    executeGit(
+  ) {
+    const { stdout, stdoutTruncated } = yield* executeGit(
       "GitVcsDriver.getReviewDiffPreview.patch",
       read.cwd,
       [
@@ -3060,11 +3131,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         ...(options.excludePaths ?? []).map((excluded) => `:(top,exclude,literal)${excluded}`),
       ],
       { maxOutputBytes: read.patchLimit, appendTruncationMarker: true, env: read.env },
-    ).pipe(Effect.map(({ stdout, stdoutTruncated }) => ({ stdout, stdoutTruncated })));
+    );
+    return { stdout, stdoutTruncated };
+  });
 
-  // A nested repository's diff from `oldCommit`, or from its own HEAD when null, to its working
-  // tree with untracked files. Paths start with its folder, so they read as files of `root`.
-  const readNestedReviewDiff = Effect.fn("GitVcsDriver.readNestedReviewDiff")(function* (
+  // Opens a nested repository's diff from `oldCommit`, or from its own HEAD when null, to its
+  // working tree with untracked files. Paths start with its folder, so they read as files of
+  // `root`. The temporary index lives in the caller's Scope.
+  const openNestedReview = Effect.fn("openNestedReview")(function* (
     root: string,
     relativePath: string,
     oldCommit: string | null,
@@ -3079,7 +3153,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     // enclosing repository.
     if (GIT_QUOTED_PATH_CHARACTER.test(relativePath) || !(yield* hasGitEntry(root, relativePath))) {
       return yield* new GitCommandError({
-        operation: "GitVcsDriver.readNestedReviewDiff",
+        operation: "GitVcsDriver.openNestedReview",
         command: "git diff",
         cwd,
         detail: "Could not read the nested repository.",
@@ -3090,57 +3164,97 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       .filter((filePath): filePath is string => filePath?.startsWith(prefix) === true)
       .map((filePath) => filePath.slice(prefix.length));
     const pathArgs = innerPaths.map((innerPath) => `:(top,literal)${innerPath}`);
-    const untracked = yield* prepareUntrackedReviewIndex(cwd, pathArgs, innerPaths[0]);
+    const untracked = yield* prepareUntrackedReviewIndex(
+      cwd,
+      pathArgs,
+      innerPaths[0],
+      NESTED_REPOSITORY_GIT_CONFIG,
+    );
     const read = {
       cwd,
-      diffArgs: options.diffArgs,
+      diffArgs: [...NESTED_REPOSITORY_GIT_CONFIG, ...options.diffArgs],
       pathArgs,
       patchLimit: options.patchLimit,
       env: untracked?.env,
     };
     const stats = yield* readReviewStats(read, oldCommit ?? "HEAD");
-    const patch =
-      stats.files.length === 0
-        ? EMPTY_REVIEW_PATCH
-        : yield* readReviewPatch(read, stats.ref, { prefix });
-    // Git prefixes the diff headers but not these lines, which the clients also read names from.
-    const stdout = patch.stdout.replace(
-      /^(?:rename|copy) (?:from|to) "?/gm,
-      (label) => label + prefix,
-    );
     const files = stats.files.map((file) => ({
       ...file,
       path: prefix + file.path,
       previousPath: file.previousPath === null ? null : prefix + file.previousPath,
     }));
-    const result: ReviewPatch =
-      untracked === null
-        ? { stdout, stdoutTruncated: true, files: undefined }
-        : { stdout, stdoutTruncated: patch.stdoutTruncated, files };
-    return result;
-  }, Effect.scoped);
+    const patch =
+      files.length === 0
+        ? null
+        : yield* Effect.cached(
+            readReviewPatch(read, stats.ref, { prefix }).pipe(
+              // Git prefixes the diff headers but not these lines, which clients read names from.
+              Effect.map(({ stdout, stdoutTruncated }) => ({
+                stdout: stdout.replace(
+                  /^(?:rename|copy) (?:from|to) "?/gm,
+                  (label) => label + prefix,
+                ),
+                stdoutTruncated,
+              })),
+            ),
+          );
+    const review: NestedReview = { files: untracked === null ? undefined : files, patch };
+    return review;
+  });
 
-  // Each gitlink is read once per pinned commit, so both sources share a read. A nested
-  // repository that cannot be read keeps its `Subproject commit` entry.
-  const readGitlinkExpansions = Effect.fn("GitVcsDriver.readGitlinkExpansions")(function* (
+  // Reads nested patches in order until the joined output, which already holds `usedBytes`,
+  // reaches `patchLimit`. Later repositories keep their totals but add no patch text.
+  const readNestedPatches = (
+    reviews: ReadonlyArray<NestedReview>,
+    patchLimit: number,
+    usedBytes: number,
+  ) => {
+    let used = usedBytes;
+    return Effect.forEach(
+      reviews,
+      (review) =>
+        Effect.suspend(() =>
+          review.patch === null
+            ? Effect.succeed({ stdout: "", stdoutTruncated: false })
+            : used >= patchLimit
+              ? Effect.succeed({ stdout: "", stdoutTruncated: true })
+              : review.patch.pipe(
+                  Effect.tap((patch) =>
+                    Effect.sync(() => {
+                      used += utf8ByteLength(patch.stdout);
+                    }),
+                  ),
+                ),
+        ).pipe(Effect.map((patch): ReviewPatch => ({ ...patch, files: review.files }))),
+      { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
+    );
+  };
+
+  // Each gitlink opens once per pinned commit, so both sources share a read. One that cannot be
+  // read, past the cap, or with too many untracked files to list keeps its `Subproject commit`
+  // entry. Needs a Scope.
+  const openGitlinkReviews = Effect.fn("openGitlinkReviews")(function* (
     root: string,
     gitlinks: ReadonlyArray<ReviewGitlink>,
     options: { readonly diffArgs: ReadonlyArray<string>; readonly patchLimit: number },
   ) {
-    const expansions = new Map<string, ReviewPatch>();
+    const reviews = new Map<string, NestedReview>();
+    const unique = [...new Map(gitlinks.map((gitlink) => [reviewGitlinkKey(gitlink), gitlink]))];
     yield* Effect.forEach(
-      new Map(gitlinks.map((gitlink) => [reviewGitlinkKey(gitlink), gitlink])),
+      unique.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
       ([key, gitlink]) =>
-        readNestedReviewDiff(root, gitlink.path, gitlink.oldCommit, options).pipe(
-          Effect.map((diff) => void expansions.set(key, diff)),
+        openNestedReview(root, gitlink.path, gitlink.oldCommit, options).pipe(
+          Effect.map((review) => {
+            if (review.files !== undefined) reviews.set(key, review);
+          }),
           Effect.ignore,
         ),
       { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY, discard: true },
     );
-    return expansions;
+    return reviews;
   });
 
-  const makeReviewSources = Effect.fn("GitVcsDriver.makeReviewSources")(function* (
+  const makeReviewSources = Effect.fn("makeReviewSources")(function* (
     cwd: string,
     dirty: ReviewPatch,
     base: ReviewPatch,
@@ -3152,10 +3266,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   ) {
     const hashDiff = (patch: ReviewPatch) =>
       crypto
-        .digest(
-          "SHA-256",
-          new TextEncoder().encode(JSON.stringify([patch.stdout, patch.files ?? []])),
-        )
+        .digest("SHA-256", utf8Encoder.encode(JSON.stringify([patch.stdout, patch.files ?? []])))
         .pipe(
           Effect.map(Hex.encode),
           Effect.mapError(
@@ -3180,7 +3291,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diff: dirty.stdout,
         ...(dirty.files === undefined ? {} : { files: dirty.files }),
         diffHash: dirtyDiffHash,
-        truncated: dirty.stdoutTruncated,
+        truncated: dirty.stdoutTruncated || dirty.files === undefined,
       },
       {
         id: "branch-range",
@@ -3191,14 +3302,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diff: base.stdout,
         ...(base.files === undefined ? {} : { files: base.files }),
         diffHash: baseDiffHash,
-        truncated: base.stdoutTruncated,
+        truncated: base.stdoutTruncated || base.files === undefined,
       },
     ];
     return sources;
   });
 
-  // A folder that is not a repository reviews the uncommitted edits of the repositories below
-  // it. Both sources show them, as for a repository with no base to compare with.
+  /**
+   * A folder that is not a repository reviews the uncommitted edits of the repositories below
+   * it. Both sources show them, as for a repository with no base to compare with.
+   */
   const getNestedRepositoriesReviewDiffPreview = Effect.fn(
     "getNestedRepositoriesReviewDiffPreview",
   )(function* (
@@ -3214,22 +3327,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (relativePaths.length === 0) {
       return { cwd: input.cwd, generatedAt: yield* DateTime.now, sources: [] };
     }
-    const diffs = yield* Effect.forEach(
-      relativePaths,
-      (relativePath) =>
-        readNestedReviewDiff(input.cwd, relativePath, null, { ...options, file: input.file }).pipe(
-          // The listing leaves out a repository it cannot read, such as a worktree whose main
-          // checkout moved. A per-file request fails like any other.
-          Effect.catch((error) => (input.file ? Effect.fail(error) : Effect.succeed(null))),
-        ),
-      { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
-    );
-    const readable = diffs.filter((diff): diff is ReviewPatch => diff !== null);
-    const files = readable.map((diff) => diff.files);
-    const result: ReviewPatch = {
-      ...joinReviewPatches(readable, options.patchLimit),
-      files: files.includes(undefined) ? undefined : files.flatMap((stats) => stats ?? []),
-    };
+    const result = yield* Effect.gen(function* () {
+      const reviews = yield* Effect.forEach(
+        relativePaths.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
+        (relativePath) =>
+          openNestedReview(input.cwd, relativePath, null, { ...options, file: input.file }).pipe(
+            // The listing leaves out a repository it cannot read, such as a worktree whose main
+            // checkout moved. A per-file request fails like any other.
+            Effect.catch((error) => (input.file ? Effect.fail(error) : Effect.succeed(null))),
+          ),
+        { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
+      );
+      const readable = reviews.filter((review): review is NestedReview => review !== null);
+      const joined = joinReviewPatches(
+        yield* readNestedPatches(readable, options.patchLimit, 0),
+        options.patchLimit,
+      );
+      return relativePaths.length > REVIEW_NESTED_REPOSITORY_MAX
+        ? { ...joined, files: undefined }
+        : joined;
+    }).pipe(Effect.scoped);
     return {
       cwd: input.cwd,
       generatedAt: yield* DateTime.now,
@@ -3288,18 +3405,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     };
 
     const nestedFile = input.file ? yield* findOwningNestedRepository(cwd, input.file.path) : null;
-    if (input.file && nestedFile !== null) {
-      // The same old side as the listing: the commit the source's base pins, else the nested HEAD.
-      const oldCommit = yield* readGitlinkCommit(
-        cwd,
-        dirtyRef ?? review.mergeBase ?? "HEAD",
-        nestedFile,
-      );
-      const diff = yield* readNestedReviewDiff(cwd, nestedFile, oldCommit, {
-        diffArgs,
-        patchLimit,
-        file: input.file,
-      });
+    const nestedBase =
+      nestedFile === null
+        ? null
+        : yield* readNestedReviewBase(cwd, dirtyRef ?? review.mergeBase ?? "HEAD", nestedFile);
+    if (input.file && nestedFile !== null && nestedBase !== null) {
+      const diff = yield* Effect.gen(function* () {
+        const nested = yield* openNestedReview(cwd, nestedFile, nestedBase.oldCommit, {
+          diffArgs,
+          patchLimit,
+          file: input.file,
+        });
+        return joinReviewPatches(yield* readNestedPatches([nested], patchLimit, 0), patchLimit);
+      }).pipe(Effect.scoped);
       return {
         cwd: input.cwd,
         generatedAt: yield* DateTime.now,
@@ -3326,34 +3444,46 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               concurrency: 2,
             });
       // A per-file request names a path the listing already resolved, so it never expands one.
-      const gitlinks = input.file
-        ? []
-        : [...(dirtyStats?.gitlinks ?? []), ...(baseStats?.gitlinks ?? [])];
-      const expansions =
+      // Excluding a gitlink also hides the paths under it, such as the deleted files of a folder
+      // a submodule replaced, so a gitlink with other paths under it keeps its bare entry.
+      const expandable = (stats: typeof dirtyStats) =>
+        stats === null || input.file
+          ? []
+          : stats.gitlinks.filter(
+              (gitlink) =>
+                !stats.files.some(
+                  (file) =>
+                    file.path.startsWith(`${gitlink.path}/`) ||
+                    file.previousPath?.startsWith(`${gitlink.path}/`) === true,
+                ),
+            );
+      const gitlinks = [...expandable(dirtyStats), ...expandable(baseStats)];
+      const reviews =
         gitlinks.length === 0
-          ? new Map<string, ReviewPatch>()
-          : yield* readGitlinkExpansions(cwd, gitlinks, { diffArgs, patchLimit });
-      // Expanded gitlinks leave the root patch, and their nested patches follow it.
+          ? new Map<string, NestedReview>()
+          : yield* openGitlinkReviews(cwd, gitlinks, { diffArgs, patchLimit });
       const readSource = Effect.fnUntraced(function* (stats: typeof dirtyStats) {
         if (stats === null) return EMPTY_REVIEW_PATCH;
-        const expanded = stats.gitlinks.flatMap((gitlink) => {
-          const diff = expansions.get(reviewGitlinkKey(gitlink));
-          return diff ? [{ path: gitlink.path, diff }] : [];
+        const expanded = expandable(stats).flatMap((gitlink) => {
+          const nested = reviews.get(reviewGitlinkKey(gitlink));
+          return nested ? [{ path: gitlink.path, nested }] : [];
         });
         const expandedPaths = new Set(expanded.map((entry) => entry.path));
         const files = stats.files.filter((file) => !expandedPaths.has(file.path));
-        const patch =
+        const patch: ReviewPatch =
           files.length === 0
             ? EMPTY_REVIEW_PATCH
-            : yield* readReviewPatch(read, stats.ref, { excludePaths: [...expandedPaths] });
-        if (expanded.length === 0) return { ...patch, files };
-        const nestedFiles = expanded.map((entry) => entry.diff.files);
-        return {
-          ...joinReviewPatches([patch, ...expanded.map((entry) => entry.diff)], patchLimit),
-          files: nestedFiles.includes(undefined)
-            ? undefined
-            : [...files, ...nestedFiles.flatMap((nested) => nested ?? [])],
-        };
+            : {
+                ...(yield* readReviewPatch(read, stats.ref, { excludePaths: [...expandedPaths] })),
+                files,
+              };
+        if (expanded.length === 0) return patch;
+        const nestedPatches = yield* readNestedPatches(
+          expanded.map((entry) => entry.nested),
+          patchLimit,
+          patch.stdoutTruncated ? patchLimit : utf8ByteLength(patch.stdout),
+        );
+        return joinReviewPatches([patch, ...nestedPatches], patchLimit);
       });
       const [dirty, base] =
         dirtyStats === baseStats
@@ -3364,7 +3494,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       if (untracked !== null) return [dirty, base] as const;
       // Too many untracked files to list: show tracked changes and mark totals incomplete.
       const incomplete = (ref: string | null, result: ReviewPatch): ReviewPatch =>
-        ref === null ? result : { ...result, files: undefined, stdoutTruncated: true };
+        ref === null ? result : { ...result, files: undefined };
       return [incomplete(dirtyRef, dirty), incomplete(review.mergeBase, base)] as const;
     }).pipe(Effect.scoped);
 
@@ -3472,8 +3602,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   // Both views compare a commit with the working tree: HEAD for Uncommitted,
-  // merge-base(base, HEAD) for Changes. The new side always comes from disk. A file of a
-  // nested repository compares with the commit its parent pins there, or with its own HEAD.
+  // merge-base(base, HEAD) for Changes. The new side always comes from disk.
   const getReviewDiffFileContents = Effect.fn("getReviewDiffFileContents")(function* (
     input: ReviewDiffFileContentsInput,
   ) {
@@ -3483,16 +3612,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ["rev-parse", "--show-toplevel"],
     ).pipe(
       Effect.map((value) => value.trim()),
-      // A folder that is not a repository reviews the repositories below it.
       Effect.catchIf(
         (error) => error.reason === "not_a_repository",
         () => Effect.succeed(null),
       ),
     );
     const root = repositoryRoot ?? input.cwd;
-    const nested =
+    const nestedFolder =
       root.length === 0 ? null : yield* findOwningNestedRepository(root, input.newPath);
-    if (root.length === 0 || (repositoryRoot === null && nested === null)) {
+    if (root.length === 0 || (repositoryRoot === null && nestedFolder === null)) {
       return yield* reviewDiffFileError(input, "Could not resolve the Git repository root.");
     }
     const oldRevision =
@@ -3502,7 +3630,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           ? (input.baseRef ?? "HEAD")
           : (yield* resolveReviewMergeBase(input.cwd, null, input.baseRef ?? undefined)).mergeBase;
     const readOldContents = Effect.gen(function* () {
-      if (nested === null) {
+      const nestedBase =
+        nestedFolder === null
+          ? null
+          : oldRevision === null
+            ? { oldCommit: null }
+            : yield* readNestedReviewBase(root, oldRevision, nestedFolder);
+      if (nestedFolder === null || nestedBase === null) {
         return yield* readReviewFileAtRevision(
           input,
           input.cwd,
@@ -3510,13 +3644,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           input.oldPath,
         );
       }
-      const pinned =
-        oldRevision === null ? null : yield* readGitlinkCommit(root, oldRevision, nested);
+      const prefix = `${nestedFolder}/`;
+      if (!input.oldPath.startsWith(prefix)) {
+        return yield* reviewDiffFileError(
+          input,
+          `Diff file '${input.oldPath}' is not in the nested repository '${nestedFolder}'.`,
+        );
+      }
       return yield* readReviewFileAtRevision(
         input,
-        path.join(root, nested),
-        pinned ?? "HEAD",
-        input.oldPath.slice(nested.length + 1),
+        path.join(root, nestedFolder),
+        nestedBase.oldCommit ?? "HEAD",
+        input.oldPath.slice(prefix.length),
       );
     });
     const [oldContents, newContents] = yield* Effect.all(

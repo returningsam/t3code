@@ -363,6 +363,14 @@ const EMPTY_GIT_STATUS_REMOTE: VcsStatusRemoteResult = {
   pr: null,
 };
 
+/** Whether the Changes view applies: a repository, or a folder holding nested repositories. */
+export function canReviewChanges(
+  isRepo: boolean,
+  status: { readonly hasNestedRepositories?: boolean | undefined } | null | undefined,
+): boolean {
+  return isRepo || status?.hasNestedRepositories === true;
+}
+
 export function mergeGitStatusParts(
   local: VcsStatusLocalResult,
   remote: VcsStatusRemoteResult | null,

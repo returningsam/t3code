@@ -144,6 +144,7 @@ import {
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
+import { canReviewChanges } from "@t3tools/shared/git";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -4261,8 +4262,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
-  // A folder that is not a repository still reviews the repositories below it in Changes.
-  const canReviewChanges = isGitRepo || gitStatusQuery.data?.hasNestedRepositories === true;
+  const canReviewGitChanges = canReviewChanges(isGitRepo, gitStatusQuery.data);
   // When context is enabled, keep a hidden, off-flow strip mounted so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
@@ -5449,11 +5449,11 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadRef, canOperatePreview, openPreview],
   );
   const addDiffSurface = useCallback(() => {
-    if (!activeThreadRef || !isServerThread || !canReviewChanges) return;
+    if (!activeThreadRef || !isServerThread || !canReviewGitChanges) return;
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
-  }, [activeThreadRef, canReviewChanges, isServerThread, onDiffPanelOpen]);
+  }, [activeThreadRef, canReviewGitChanges, isServerThread, onDiffPanelOpen]);
   const openChangesFromThreadPanel = useCallback(() => {
     addDiffSurface();
   }, [addDiffSurface]);
@@ -11281,7 +11281,7 @@ export default function ChatView(props: ChatViewProps) {
       ? { onCheckoutPullRequestRequest: openPullRequestDialog }
       : {}),
     onComposerFocusRequest: scheduleComposerFocus,
-    ...(isServerThread && canReviewChanges ? { onOpenChanges: openChangesFromThreadPanel } : {}),
+    ...(isServerThread && canReviewGitChanges ? { onOpenChanges: openChangesFromThreadPanel } : {}),
     onRunProjectScript: runProjectScript,
     onAddProjectScript: saveProjectScript,
     onUpdateProjectScript: updateProjectScript,
@@ -12068,7 +12068,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddDevice={addDeviceSurface}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
-          diffAvailable={isServerThread && canReviewChanges}
+          diffAvailable={isServerThread && canReviewGitChanges}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
@@ -12127,7 +12127,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddDevice={addDeviceSurface}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}
-            diffAvailable={isServerThread && canReviewChanges}
+            diffAvailable={isServerThread && canReviewGitChanges}
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
