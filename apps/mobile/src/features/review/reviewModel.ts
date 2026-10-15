@@ -528,14 +528,27 @@ export function buildReviewParsedDiff(
   }
 }
 
+export function getNestedRepositoriesNotice(
+  source: ReviewDiffPreviewSource | undefined,
+): string | null {
+  const repositories = source?.nestedRepositories;
+  return repositories
+    ? `Showing ${repositories.shown} of ${repositories.changed} repositories with changes, most recently edited first.`
+    : null;
+}
+
 export function applyReviewDiffMetadata(
   previewDiff: ReviewParsedDiff,
-  selectedSection: Pick<ReviewSectionItem, "files" | "truncated"> | null,
+  selectedSection: Pick<ReviewSectionItem, "files" | "truncated" | "source"> | null,
 ): ReviewParsedDiff {
   if (previewDiff.kind === "empty") return previewDiff;
-  const notice = selectedSection?.truncated
-    ? `This preview exceeds the size limit. Changes shown are incomplete.${selectedSection.files ? " Counts include all changes." : ""}`
-    : previewDiff.notice;
+  const notices = [
+    getNestedRepositoriesNotice(selectedSection?.source),
+    selectedSection?.truncated
+      ? `This preview exceeds the size limit. Changes shown are incomplete.${selectedSection.files ? " Counts include all changes." : ""}`
+      : null,
+  ].filter((notice) => notice !== null);
+  const notice = notices.length > 0 ? notices.join(" ") : previewDiff.notice;
   if (previewDiff.kind !== "files" || !selectedSection?.files) return { ...previewDiff, notice };
   const totals = selectedSection.files.reduce(
     (total, file) => ({

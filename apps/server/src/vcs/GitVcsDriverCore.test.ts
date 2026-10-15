@@ -2302,6 +2302,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* (yield* FileSystem.FileSystem).makeDirectory(cwd, { recursive: true });
         return yield* initRepoWithCommit(cwd);
       });
+    // A folder's review orders its repositories by their newest changed file.
+    const setModifiedTime = (filePath: string, order: number) =>
+      Effect.gen(function* () {
+        const seconds = 2_000_000_000 + order;
+        yield* (yield* FileSystem.FileSystem).utimes(filePath, seconds, seconds);
+      });
 
     it.effect(
       "lists each checkout's uncommitted edits below a folder that is not a repository",
@@ -2319,6 +2325,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* git(worktree, ["mv", "README.md", "GUIDE.md"]);
           yield* writeTextFile(worktree, "notes.txt", "new\n");
           yield* writeTextFile(root, "loose.txt", "outside every repository\n");
+          yield* setModifiedTime(pathService.join(main, "README.md"), 1);
 
           assert.deepStrictEqual(yield* driver.findNestedRepositories(root), [
             "main",
@@ -2377,9 +2384,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const root = yield* makeTmpDir();
         const pathService = yield* Path.Path;
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        for (const name of ["one", "two"]) {
+        for (const [index, name] of ["one", "two"].entries()) {
           yield* initRepoIn(pathService.join(root, name));
           yield* writeTextFile(root, `${name}/large.txt`, `${"x".repeat(99)}\n`.repeat(700));
+          yield* setModifiedTime(pathService.join(root, name, "large.txt"), -index);
         }
 
         const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd: root }), "working-tree");
@@ -2390,6 +2398,140 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           { path: "one/large.txt", previousPath: null, additions: 700, deletions: 0 },
           { path: "two/large.txt", previousPath: null, additions: 700, deletions: 0 },
         ]);
+      }),
+    );
+
+    it.effect("reads only the changed repositories, the most recently changed first", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        for (const name of ["a-edited", "b-clean", "c-added", "d-deleted"]) {
+          yield* initRepoIn(pathService.join(root, name));
+        }
+        yield* writeTextFile(root, "a-edited/README.md", "# edited\n");
+        yield* setModifiedTime(pathService.join(root, "a-edited", "README.md"), 1);
+        yield* setModifiedTime(pathService.join(root, "b-clean", "README.md"), 9);
+        // A file in a new folder dates its repository, not the folder.
+        yield* writeTextFile(root, "c-added/new/notes.txt", "new\n");
+        yield* setModifiedTime(pathService.join(root, "c-added", "new", "notes.txt"), 3);
+        yield* setModifiedTime(pathService.join(root, "c-added", "new"), 0);
+        // A deleted file is dated by the folder it left.
+        yield* fileSystem.remove(pathService.join(root, "d-deleted", "README.md"));
+        yield* setModifiedTime(pathService.join(root, "d-deleted"), 2);
+
+        const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd: root }), "working-tree");
+
+        assert.deepStrictEqual(source.files, [
+          { path: "c-added/new/notes.txt", previousPath: null, additions: 1, deletions: 0 },
+          { path: "d-deleted/README.md", previousPath: null, additions: 0, deletions: 1 },
+          { path: "a-edited/README.md", previousPath: null, additions: 1, deletions: 1 },
+        ]);
+        assert.isFalse(source.truncated);
+        assert.isUndefined(source.nestedRepositories);
+        assert.deepStrictEqual(
+          yield* driver.readNestedChangeTotals(root, yield* driver.findNestedRepositories(root)),
+          { insertions: 2, deletions: 2 },
+        );
+      }),
+    );
+
+    it.effect("dates a changed symlink by the link, not what it points to", () =>
+      Effect.gen(function* () {
+        if ((yield* HostProcess.Platform) === "win32") return;
+        const root = yield* makeTmpDir();
+        const outside = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        for (const name of ["a-linked", "b-edited"]) {
+          yield* initRepoIn(pathService.join(root, name));
+        }
+        yield* writeTextFile(outside, "target.txt", "outside\n");
+        yield* setModifiedTime(pathService.join(outside, "target.txt"), 9);
+        const link = pathService.join(root, "a-linked", "link");
+        yield* fileSystem.symlink(pathService.join(outside, "target.txt"), link);
+        NodeFS.lutimesSync(link, 2_000_000_000, 2_000_000_000);
+        yield* writeTextFile(root, "b-edited/README.md", "# edited\n");
+        yield* setModifiedTime(pathService.join(root, "b-edited", "README.md"), 1);
+
+        const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd: root }), "working-tree");
+
+        assert.deepStrictEqual(
+          source.files?.map((file) => file.path),
+          ["b-edited/README.md", "a-linked/link"],
+        );
+      }),
+    );
+
+    it.effect("reads a repository whose only change is in a submodule it hides", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const upstream = yield* makeTmpDir("git-submodule-");
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(upstream);
+        const nested = pathService.join(root, "nested");
+        yield* initRepoIn(nested);
+        yield* git(nested, [
+          "-c",
+          "protocol.file.allow=always",
+          "submodule",
+          "add",
+          upstream,
+          "sub",
+        ]);
+        yield* git(nested, ["commit", "-m", "add submodule"]);
+        yield* git(nested, ["config", "submodule.sub.ignore", "all"]);
+        yield* writeTextFile(nested, "sub/README.md", "# edited\n");
+
+        const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd: root }), "working-tree");
+
+        assert.deepStrictEqual(
+          source.files?.map((file) => file.path),
+          ["nested/sub"],
+        );
+      }),
+    );
+
+    it.effect("reads the most recently changed repositories up to the limit", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const template = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(template);
+        const names = Array.from(
+          { length: 34 },
+          (_, index) => `repo-${`${index}`.padStart(2, "0")}`,
+        );
+        for (const [index, name] of names.entries()) {
+          yield* fileSystem.copy(template, pathService.join(root, name));
+          // The last one stays clean.
+          if (index === names.length - 1) continue;
+          yield* writeTextFile(root, `${name}/README.md`, `# ${name}\n`);
+          yield* setModifiedTime(pathService.join(root, name, "README.md"), index);
+        }
+
+        const preview = yield* driver.getReviewDiffPreview({ cwd: root });
+
+        const shown = names.slice(1, 33).toReversed();
+        for (const source of preview.sources) {
+          assert.isFalse(source.truncated);
+          assert.deepStrictEqual(source.nestedRepositories, { shown: 32, changed: 33 });
+          assert.deepStrictEqual(
+            source.files?.map((file) => file.path),
+            shown.map((name) => `${name}/README.md`),
+          );
+          assert.isTrue(source.diff.startsWith("diff --git a/repo-32/README.md"));
+          assert.notInclude(source.diff, "repo-00/README.md");
+        }
+        assert.deepStrictEqual(
+          yield* driver.readNestedChangeTotals(root, yield* driver.findNestedRepositories(root)),
+          { insertions: 32, deletions: 32 },
+        );
       }),
     );
 
@@ -2604,6 +2746,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isTrue(source.truncated);
         assert.include(source.diff, "+# one edit");
         assert.include(source.diff, "+# two edit");
+        assert.isNull(yield* driver.readNestedChangeTotals(root, ["one", "two"]));
       }),
     );
 

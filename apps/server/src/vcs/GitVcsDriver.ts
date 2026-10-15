@@ -347,6 +347,14 @@ export class GitVcsDriver extends Context.Service<
      * `cwd` with `/` separators. The review diff of a non-repository folder lists their edits.
      */
     readonly findNestedRepositories: (cwd: string) => Effect.Effect<ReadonlyArray<string>>;
+    /**
+     * Totals of the uncommitted edits, untracked files included, of the `repositories` below
+     * `cwd` that its review diff shows. Null when one has too many untracked files to count.
+     */
+    readonly readNestedChangeTotals: (
+      cwd: string,
+      repositories: ReadonlyArray<string>,
+    ) => Effect.Effect<{ readonly insertions: number; readonly deletions: number } | null>;
     readonly readConfigValue: (
       cwd: string,
       key: string,

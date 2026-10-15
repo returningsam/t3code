@@ -1913,7 +1913,7 @@ export default function GitActionsControl({
         >
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
           <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>Changes</span>
-          {isRepo ? (
+          {isRepo || gitStatus?.branchChanges ? (
             <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
               <span className="text-success">
                 +{formatDiffCount(changesTotals?.insertions ?? 0)}

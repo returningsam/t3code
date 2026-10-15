@@ -1,8 +1,13 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as TestClock from "effect/testing/TestClock";
 
 import { VcsRepositoryDetectionError } from "@t3tools/contracts";
 
@@ -19,6 +24,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 function layer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
   readonly nestedRepositories?: ReadonlyArray<string>;
+  readonly readNestedChangeTotals?: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"];
 }) {
   return GitWorkflowService.layer.pipe(
     Layer.provide(
@@ -29,11 +35,30 @@ function layer(input: {
     Layer.provide(
       Layer.mock(GitVcsDriver.GitVcsDriver)({
         findNestedRepositories: () => Effect.succeed(input.nestedRepositories ?? []),
+        readNestedChangeTotals:
+          input.readNestedChangeTotals ?? (() => Effect.succeed({ insertions: 0, deletions: 0 })),
       }),
     ),
-    Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    Layer.provide(
+      Layer.mock(GitManager.GitManager)({
+        invalidateLocalStatus: () => Effect.void,
+        invalidateStatus: () => Effect.void,
+      }),
+    ),
   );
 }
+
+// Each read of the nested totals reports its call number, and totals that count the calls.
+const countedNestedChangeTotals = Effect.gen(function* () {
+  const calls = yield* Queue.unbounded<number>();
+  let count = 0;
+  const read: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"] = () =>
+    Effect.sync(() => ++count).pipe(
+      Effect.tap((call) => Queue.offer(calls, call)),
+      Effect.map((call) => ({ insertions: call, deletions: 0 })),
+    );
+  return { calls, read };
+});
 
 describe("GitWorkflowService", () => {
   it.effect("reports a non-Git VCS repository as not a Git repository", () =>
@@ -139,6 +164,152 @@ describe("GitWorkflowService", () => {
         }),
       ),
     ),
+  );
+
+  it.effect("reuses the totals of nested repositories' edits across status reads", () => {
+    const readNestedChangeTotals = vi.fn((cwd: string, repositories: ReadonlyArray<string>) =>
+      Effect.succeed({ insertions: cwd.length, deletions: repositories.length }),
+    );
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const local = yield* workflow.localStatus({ cwd: "/checkouts" });
+      const full = yield* workflow.status({ cwd: "/checkouts" });
+
+      const expected = { baseRef: null, insertions: "/checkouts".length, deletions: 2 };
+      assert.deepStrictEqual(local.branchChanges, expected);
+      assert.deepStrictEqual(full.branchChanges, expected);
+      assert.equal(readNestedChangeTotals.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+          nestedRepositories: ["main", "worktrees/wt-a"],
+          readNestedChangeTotals,
+        }),
+      ),
+    );
+  });
+
+  it.effect("reads nested totals again after a status refresh invalidates them", () =>
+    Effect.gen(function* () {
+      const totals = yield* countedNestedChangeTotals;
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const first = yield* workflow.localStatus({ cwd: "/checkouts" });
+        yield* workflow.invalidateLocalStatus("/checkouts");
+        const second = yield* workflow.localStatus({ cwd: "/checkouts" });
+
+        assert.deepStrictEqual(first.branchChanges, { baseRef: null, insertions: 1, deletions: 0 });
+        assert.deepStrictEqual(second.branchChanges, {
+          baseRef: null,
+          insertions: 2,
+          deletions: 0,
+        });
+        assert.deepStrictEqual(
+          [yield* Queue.take(totals.calls), yield* Queue.take(totals.calls)],
+          [1, 2],
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            detect: () => Effect.succeed(null),
+            nestedRepositories: ["main"],
+            readNestedChangeTotals: totals.read,
+          }),
+        ),
+      );
+    }),
+  );
+
+  it.effect("shows the last nested totals while a refreshed read outlasts the wait", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      let calls = 0;
+      const readNestedChangeTotals = vi.fn(() => {
+        calls += 1;
+        return calls === 1
+          ? Effect.succeed({ insertions: 1, deletions: 0 })
+          : Deferred.await(gate).pipe(Effect.as({ insertions: 2, deletions: 0 }));
+      });
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const first = yield* workflow.localStatus({ cwd: "/checkouts" });
+        yield* workflow.invalidateLocalStatus("/checkouts");
+        const slow = yield* workflow.localStatus({ cwd: "/checkouts" }).pipe(Effect.forkChild);
+        yield* TestClock.adjust(Duration.seconds(2));
+        const second = yield* Fiber.join(slow);
+
+        assert.deepStrictEqual(second.branchChanges, first.branchChanges);
+      }).pipe(
+        Effect.provide(
+          layer({
+            detect: () => Effect.succeed(null),
+            nestedRepositories: ["main"],
+            readNestedChangeTotals,
+          }),
+        ),
+      );
+    }),
+  );
+
+  it.effect("reads nested totals again once they expire", () =>
+    Effect.gen(function* () {
+      const totals = yield* countedNestedChangeTotals;
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        yield* workflow.localStatus({ cwd: "/checkouts" });
+        yield* TestClock.adjust(Duration.seconds(30));
+        yield* workflow.localStatus({ cwd: "/checkouts" });
+
+        assert.deepStrictEqual(
+          [yield* Queue.take(totals.calls), yield* Queue.take(totals.calls)],
+          [1, 2],
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            detect: () => Effect.succeed(null),
+            nestedRepositories: ["main"],
+            readNestedChangeTotals: totals.read,
+          }),
+        ),
+      );
+    }),
+  );
+
+  it.effect("keeps reading nested totals that outlast a status read", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      const readNestedChangeTotals = vi.fn(() =>
+        Deferred.await(gate).pipe(Effect.as({ insertions: 3, deletions: 1 })),
+      );
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const early = yield* workflow.localStatus({ cwd: "/checkouts" }).pipe(Effect.forkChild);
+        yield* TestClock.adjust(Duration.seconds(2));
+        const first = yield* Fiber.join(early);
+        const late = yield* workflow.localStatus({ cwd: "/checkouts" }).pipe(Effect.forkChild);
+        yield* Deferred.succeed(gate, undefined);
+        const second = yield* Fiber.join(late);
+
+        assert.isTrue(first.hasNestedRepositories);
+        assert.isUndefined(first.branchChanges);
+        assert.deepStrictEqual(second.branchChanges, {
+          baseRef: null,
+          insertions: 3,
+          deletions: 1,
+        });
+        assert.equal(readNestedChangeTotals.mock.calls.length, 1);
+      }).pipe(
+        Effect.provide(
+          layer({
+            detect: () => Effect.succeed(null),
+            nestedRepositories: ["main"],
+            readNestedChangeTotals,
+          }),
+        ),
+      );
+    }),
   );
 
   it.effect("does not call GitManager status methods when no VCS repository is detected", () => {

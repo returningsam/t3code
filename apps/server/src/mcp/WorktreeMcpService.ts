@@ -178,10 +178,10 @@ const make = Effect.gen(function* () {
     // The repo check runs regardless of whether baseRef was supplied, so a
     // non-repository workspace fails with an actionable error instead of an
     // opaque git failure further down.
-    const localStatus = yield* gitWorkflow
-      .localStatus({ cwd: projectCwd })
+    const isRepository = yield* gitWorkflow
+      .isRepository(projectCwd)
       .pipe(asOperationFailed("Unable to read git status"));
-    if (!localStatus.isRepo) {
+    if (!isRepository) {
       return yield* failure(
         "invalid_request",
         `Project workspace '${projectCwd}' is not a git repository.`,
@@ -219,6 +219,9 @@ const make = Effect.gen(function* () {
 
     let baseRef = input.baseRef;
     if (baseRef === undefined) {
+      const localStatus = yield* gitWorkflow
+        .localStatus({ cwd: projectCwd })
+        .pipe(asOperationFailed("Unable to read git status"));
       if (localStatus.refName === null) {
         return yield* failure(
           "invalid_request",

@@ -260,6 +260,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
       workingTree: { files: [], insertions: 0, deletions: 0 },
     }),
   );
+  const isRepository = vi.fn(() => Effect.succeed(options.notARepo !== true));
   const refreshStatus = vi.fn((_: string) => Effect.die("refreshStatus stub"));
   const runForThread = vi.fn((input: { readonly worktreePath: string }) => {
     switch (options.setupScript ?? "started") {
@@ -321,6 +322,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           listRefs,
           listLocalBranchNames,
+          isRepository,
           localStatus,
           fetchRemote,
           resolveRemoteTrackingCommit,
@@ -531,9 +533,9 @@ describe("t3_worktree_handoff", () => {
         baseRefName: "dev",
         path: "/custom/worktree/location",
       });
-      // localStatus is always consulted now (repo pre-check), but its branch
-      // must not override the explicit baseRef.
-      expect(harness.localStatus).toHaveBeenCalled();
+      // The repo pre-check does not read status, and an explicit baseRef
+      // needs no current branch.
+      expect(harness.localStatus).not.toHaveBeenCalled();
       expect(harness.runForThread).not.toHaveBeenCalled();
       expect(result.worktreePath).toBe("/custom/worktree/location");
       expect(result.startedFromOrigin).toBe(true);
