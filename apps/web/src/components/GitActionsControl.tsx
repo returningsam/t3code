@@ -1171,7 +1171,8 @@ export default function GitActionsControl({
   const gitStatusForActions = gitStatus;
   // Matches the diff panel's Changes view. Older servers only report uncommitted totals.
   const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
-  // A folder of repositories also lists its changed ones under the Changes row.
+  // A folder of repositories names its one changed repository on the Changes row, or lists
+  // several under it.
   const nestedRepositoryChanges = isRepo ? undefined : gitStatus?.nestedRepositoryChanges;
   const soleRepository = soleNestedRepository(nestedRepositoryChanges);
   const nestedRows =
@@ -1928,6 +1929,7 @@ export default function GitActionsControl({
             variant="ghost"
             size="sm"
             part="row"
+            {...(soleRepository ? { "aria-label": `Changes in ${soleRepository.path}` } : {})}
             disabled={!onOpenChanges}
             onClick={() => onOpenChanges?.()}
           >
