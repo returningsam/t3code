@@ -30,19 +30,42 @@ export function reconcileNestedRepositorySelection(
 }
 
 /**
- * Picks or unpicks one repository in the diff panel's repository menu. Picking one while every
- * repository shows narrows the view to it, and picking the last one left shows them all again.
+ * Settles a menu pick: picking every repository means all of them (`[]`), and picking none falls
+ * back to the most recently edited one. `available` is in the status's recency order.
+ */
+function settleNestedRepositoryPicks(
+  picked: ReadonlyArray<string>,
+  available: ReadonlyArray<string>,
+): string[] {
+  const next = picked.length > 0 ? [...picked] : available.slice(0, 1);
+  return available.every((candidate) => next.includes(candidate)) ? [] : next;
+}
+
+/**
+ * Picks or unpicks one repository in the diff panel's repository menu, where every repository
+ * shows checked while all of them are selected. `available` is in the status's recency order.
  */
 export function toggleNestedRepository(
   selected: ReadonlyArray<string>,
   available: ReadonlyArray<string>,
   path: string,
 ): string[] {
-  if (selected.length === 0) return [path];
-  const next = selected.includes(path)
-    ? selected.filter((candidate) => candidate !== path)
-    : [...selected, path];
-  return available.every((candidate) => next.includes(candidate)) ? [] : next;
+  const current = selected.length === 0 ? available : selected;
+  const next = current.includes(path)
+    ? current.filter((candidate) => candidate !== path)
+    : [...current, path];
+  return settleNestedRepositoryPicks(next, available);
+}
+
+/**
+ * The repository menu's "All repositories" item: selects every repository, or when they already
+ * are, only the most recently edited one. `available` is in the status's recency order.
+ */
+export function toggleAllNestedRepositories(
+  selected: ReadonlyArray<string>,
+  available: ReadonlyArray<string>,
+): string[] {
+  return selected.length === 0 ? settleNestedRepositoryPicks([], available) : [];
 }
 
 export function nestedRepositorySelectionLabel(selected: ReadonlyArray<string>): string {

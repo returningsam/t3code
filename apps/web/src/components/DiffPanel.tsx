@@ -39,6 +39,7 @@ import {
 import {
   nestedRepositorySelectionLabel,
   reconcileNestedRepositorySelection,
+  toggleAllNestedRepositories,
   toggleNestedRepository,
 } from "../nestedRepositories.logic";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -864,7 +865,14 @@ export default function DiffPanel({
             <DropdownMenuContent align="start">
               <DropdownMenuCheckboxItem
                 checked={selectedNestedRepositories.length === 0}
-                onCheckedChange={() => selectNestedRepositories([])}
+                onCheckedChange={() =>
+                  selectNestedRepositories(
+                    toggleAllNestedRepositories(
+                      selectedNestedRepositories,
+                      nestedRepositoryPaths ?? [],
+                    ),
+                  )
+                }
               >
                 All repositories
               </DropdownMenuCheckboxItem>
@@ -872,12 +880,15 @@ export default function DiffPanel({
               {nestedRepositoryMenuPaths.map((path) => (
                 <DropdownMenuCheckboxItem
                   key={path}
-                  checked={selectedNestedRepositories.includes(path)}
+                  checked={
+                    selectedNestedRepositories.length === 0 ||
+                    selectedNestedRepositories.includes(path)
+                  }
                   onCheckedChange={() =>
                     selectNestedRepositories(
                       toggleNestedRepository(
                         selectedNestedRepositories,
-                        nestedRepositoryMenuPaths,
+                        nestedRepositoryPaths ?? [],
                         path,
                       ),
                     )
