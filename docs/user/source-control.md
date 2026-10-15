@@ -19,7 +19,8 @@ the project records for it. A project folder that is not a git repository itself
 holding a main checkout and its worktrees, lists the uncommitted edits of the repositories one or
 two folders below it, the most recently edited first, up to 32 of them. The thread details panel
 lists the changed repositories with their totals. Click one to review only that repository, or
-pick several from the repository menu beside the diff panel's scope menu. Turn diffs still need
+pick several from the repository menu beside the diff panel's scope menu, which lists every
+changed repository, including those past the first 32. Turn diffs still need
 the project folder to be a git repository.
 
 ## Connect an account
