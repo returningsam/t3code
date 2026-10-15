@@ -2,7 +2,11 @@ import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Scope from "effect/Scope";
 
 import {
   GitManagerError,
@@ -130,17 +134,22 @@ export class GitWorkflowService extends Context.Service<
 >()("t3/git/GitWorkflowService") {}
 
 // Status refreshes on focus, git actions, and turn ends, so a folder's scan for nested
-// repositories and the totals of their edits are reused for a while. A folder too slow to
-// scan, such as a dead network mount, reads as having none, and totals too slow to read are
-// left out.
+// repositories is reused for a while. A folder too slow to scan, such as a dead network mount,
+// reads as having none.
 const NESTED_REPOSITORY_SCAN_TTL = Duration.seconds(30);
 const NESTED_REPOSITORY_SCAN_TIMEOUT = Duration.millis(1500);
-const NESTED_REPOSITORY_TOTALS_TIMEOUT = Duration.seconds(2);
 const NESTED_REPOSITORY_SCAN_CACHE_CAPACITY = 256;
+// The totals of the nested repositories' edits are read in the background, and kept until they
+// expire or a status refresh invalidates them. A status read shows the last totals read, and
+// waits this long for fresh ones only while the folder has none.
+const NESTED_CHANGE_TOTALS_TTL = Duration.seconds(30);
+const NESTED_CHANGE_TOTALS_WAIT = Duration.seconds(2);
+
+type NestedChangeTotals = { readonly insertions: number; readonly deletions: number } | null;
 
 interface NestedRepositories {
-  /** Null when they could not be counted or took too long to read. */
-  readonly changes: { readonly insertions: number; readonly deletions: number } | null;
+  /** Null until a read finishes, or when one repository has too much to count. */
+  readonly changes: NestedChangeTotals;
 }
 
 function nonRepositoryLocalStatus(nested: NestedRepositories | null): VcsStatusLocalResult {
@@ -187,28 +196,59 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const nestedRepositoriesCache = yield* Cache.makeWith(
-    Effect.fnUntraced(function* (cwd: string) {
-      const repositories = yield* git.findNestedRepositories(cwd).pipe(
+    (cwd: string) =>
+      git.findNestedRepositories(cwd).pipe(
         Effect.timeoutOrElse({
           duration: NESTED_REPOSITORY_SCAN_TIMEOUT,
           orElse: () => Effect.succeed([]),
         }),
-      );
-      if (repositories.length === 0) return null;
-      const changes = yield* git.readNestedChangeTotals(cwd, repositories).pipe(
-        Effect.timeoutOrElse({
-          duration: NESTED_REPOSITORY_TOTALS_TIMEOUT,
-          orElse: () => Effect.succeed(null),
-        }),
-      );
-      return { changes };
-    }),
+      ),
     {
       capacity: NESTED_REPOSITORY_SCAN_CACHE_CAPACITY,
       timeToLive: () => NESTED_REPOSITORY_SCAN_TTL,
     },
   );
-  const readNestedRepositories = (cwd: string) => Cache.get(nestedRepositoriesCache, cwd);
+  const backgroundScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+    Scope.close(scope, Exit.void),
+  );
+  const latestNestedChangeTotals = new Map<string, NestedChangeTotals>();
+  const nestedChangeTotalsCache = yield* Cache.makeWith(
+    (cwd: string) =>
+      Cache.get(nestedRepositoriesCache, cwd).pipe(
+        Effect.flatMap((repositories) => git.readNestedChangeTotals(cwd, repositories)),
+        Effect.tap((changes) =>
+          Effect.sync(() => {
+            latestNestedChangeTotals.delete(cwd);
+            latestNestedChangeTotals.set(cwd, changes);
+            if (latestNestedChangeTotals.size > NESTED_REPOSITORY_SCAN_CACHE_CAPACITY) {
+              latestNestedChangeTotals.delete(latestNestedChangeTotals.keys().next().value!);
+            }
+          }),
+        ),
+      ),
+    {
+      capacity: NESTED_REPOSITORY_SCAN_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? NESTED_CHANGE_TOTALS_TTL : Duration.zero),
+    },
+  );
+  // A read that outlasts the wait keeps running, so the next status read shows its totals.
+  const readNestedChangeTotals = Effect.fn("GitWorkflowService.readNestedChangeTotals")(function* (
+    cwd: string,
+  ) {
+    const read = yield* Cache.get(nestedChangeTotalsCache, cwd).pipe(
+      Effect.forkIn(backgroundScope),
+    );
+    if (latestNestedChangeTotals.has(cwd)) return latestNestedChangeTotals.get(cwd) ?? null;
+    const exit = yield* Fiber.await(read).pipe(Effect.timeoutOption(NESTED_CHANGE_TOTALS_WAIT));
+    return Option.isSome(exit) && Exit.isSuccess(exit.value) ? exit.value.value : null;
+  });
+  const readNestedRepositories = Effect.fn("GitWorkflowService.readNestedRepositories")(function* (
+    cwd: string,
+  ) {
+    const repositories = yield* Cache.get(nestedRepositoriesCache, cwd);
+    if (repositories.length === 0) return null;
+    return { changes: yield* readNestedChangeTotals(cwd) };
+  });
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -407,9 +447,16 @@ export const make = Effect.gen(function* () {
           isGitRepository ? gitManager.remoteStatus(input, options) : Effect.succeed(null),
         ),
       ),
-    invalidateLocalStatus: gitManager.invalidateLocalStatus,
+    // The status broadcaster passes the same real path to these and to the status reads.
+    invalidateLocalStatus: (cwd) =>
+      gitManager
+        .invalidateLocalStatus(cwd)
+        .pipe(Effect.andThen(Cache.invalidate(nestedChangeTotalsCache, cwd))),
     invalidateRemoteStatus: gitManager.invalidateRemoteStatus,
-    invalidateStatus: gitManager.invalidateStatus,
+    invalidateStatus: (cwd) =>
+      gitManager
+        .invalidateStatus(cwd)
+        .pipe(Effect.andThen(Cache.invalidate(nestedChangeTotalsCache, cwd))),
     pullCurrentBranch: (cwd) =>
       ensureGitCommand("GitWorkflowService.pullCurrentBranch", cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),

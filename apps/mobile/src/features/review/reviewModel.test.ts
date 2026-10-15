@@ -355,15 +355,19 @@ describe("applyReviewDiffMetadata", () => {
       headRef: null,
       diff,
       diffHash: "hash",
-      truncated: true,
+      truncated: false,
       nestedRepositories: { shown: 32, changed: 75 },
     };
-    const result = applyReviewDiffMetadata(buildReviewParsedDiff(diff, "folder"), {
-      truncated: true,
-      source,
-    });
-    expect(result.kind).toBe("files");
-    if (result.kind !== "files") return;
-    expect(result.notice).toBe("Showing 32 of 75 repositories with changes, most recent first.");
+    const parsed = buildReviewParsedDiff(diff, "folder");
+    const notice = (truncated: boolean) => {
+      const result = applyReviewDiffMetadata(parsed, { truncated, source });
+      return result.kind === "files" ? result.notice : undefined;
+    };
+    expect(notice(false)).toBe(
+      "Showing 32 of 75 repositories with changes, most recently edited first.",
+    );
+    expect(notice(true)).toBe(
+      "Showing 32 of 75 repositories with changes, most recently edited first. This preview exceeds the size limit. Changes shown are incomplete.",
+    );
   });
 });

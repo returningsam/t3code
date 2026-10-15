@@ -17,8 +17,9 @@ diff panel's **Changes** and **Uncommitted** views list the files changed inside
 repository's folder. A submodule whose checked-out commit moved shows everything since the commit
 the project records for it. A project folder that is not a git repository itself, such as one
 holding a main checkout and its worktrees, lists the uncommitted edits of the repositories one or
-two folders below it, the most recently edited first, up to 32 of them. Turn diffs still need the
-project folder to be a git repository.
+two folders below it, the most recently edited first, up to 32 of them. The totals beside
+**Changes** count only the repositories it lists. Turn diffs still need the project folder to be a
+git repository.
 
 ## Connect an account
 

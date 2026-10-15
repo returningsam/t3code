@@ -1,3 +1,5 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's FileSystem has no lstat.
+import * as NodeFSP from "node:fs/promises";
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as Crypto from "effect/Crypto";
@@ -75,10 +77,9 @@ const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const REVIEW_NESTED_REPOSITORY_CONCURRENCY = 4;
 // A review reads at most this many nested repositories. A folder with more is incomplete.
 const REVIEW_NESTED_REPOSITORY_MAX = 32;
-// A folder's review reads its changed repositories with the newest changed files first. A
-// repository's newest is found among this many of its changed paths.
-const NESTED_REPOSITORY_RECENCY_MAX_PATHS = 100;
-const NESTED_REPOSITORY_STATUS_MAX_OUTPUT_BYTES = 64 * 1024;
+// A folder's review dates each nested repository by the changed paths that fit in this much
+// status output.
+const REVIEW_NESTED_REPOSITORY_STATUS_MAX_OUTPUT_BYTES = 64 * 1024;
 // Finding the repositories below a non-repository folder checks at most this many entries.
 const NESTED_REPOSITORY_SCAN_MAX_ENTRIES = 500;
 // Clients name review paths, so finding the repository that owns one stops at these bounds.
@@ -232,6 +233,16 @@ function parseNumstatEntries(
     });
   }
   return entries;
+}
+
+function sumReviewFileStats(files: ReadonlyArray<ReviewDiffFileStat>) {
+  let insertions = 0;
+  let deletions = 0;
+  for (const file of files) {
+    insertions += file.additions;
+    deletions += file.deletions;
+  }
+  return { insertions, deletions };
 }
 
 // -z preserves tabs/newlines in paths and gives renames two separate path fields.
@@ -2942,13 +2953,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         exitCode: result.exitCode,
       });
     }
-    let insertions = 0;
-    let deletions = 0;
-    for (const file of parseReviewNumstat(result.stdout)) {
-      insertions += file.additions;
-      deletions += file.deletions;
-    }
-    return { baseRef, insertions, deletions };
+    return { baseRef, ...sumReviewFileStats(parseReviewNumstat(result.stdout)) };
   }, Effect.scoped);
 
   const isPathWithinRoot = (root: string, candidate: string) => {
@@ -3312,9 +3317,20 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return sources;
   });
 
-  // The repositories with uncommitted edits or untracked files, the newest changed file first.
-  // A deleted file has no time, so a repository with only deletions sorts last. One that cannot
-  // be read is left out.
+  // When a changed path's file is gone, as after a deletion, the nearest folder above it that
+  // remains dates the change. lstat keeps a symlink from leading outside the repository.
+  const readNestedChangedAt = (cwd: string, relativePath: string): Effect.Effect<number> =>
+    Effect.tryPromise(() => NodeFSP.lstat(path.join(cwd, relativePath))).pipe(
+      Effect.map((info) => info.mtimeMs),
+      Effect.catch(() =>
+        relativePath === "."
+          ? Effect.succeed(0)
+          : readNestedChangedAt(cwd, path.dirname(relativePath)),
+      ),
+    );
+
+  // The repositories with uncommitted edits or untracked files, the newest changed path first.
+  // One that cannot be read is left out.
   const listChangedNestedRepositories = Effect.fn("listChangedNestedRepositories")(function* (
     root: string,
     relativePaths: ReadonlyArray<string>,
@@ -3333,26 +3349,23 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               "--porcelain",
               "-z",
               "--no-renames",
-              "--untracked-files=normal",
+              "--untracked-files=all",
+              "--ignore-submodules=none",
             ],
             {
-              maxOutputBytes: NESTED_REPOSITORY_STATUS_MAX_OUTPUT_BYTES,
+              maxOutputBytes: REVIEW_NESTED_REPOSITORY_STATUS_MAX_OUTPUT_BYTES,
               appendTruncationMarker: true,
             },
           );
           // Each entry is two status letters, a space, and the path.
           const entries = splitNullSeparatedGitStdoutPaths(status);
           if (entries.length === 0) return null;
-          const modifiedTimes = yield* Effect.forEach(
-            entries.slice(0, NESTED_REPOSITORY_RECENCY_MAX_PATHS),
-            (entry) =>
-              fileSystem.stat(path.join(cwd, entry.slice(3))).pipe(
-                Effect.map((info) => Option.getOrNull(info.mtime)?.getTime() ?? 0),
-                Effect.orElseSucceed(() => 0),
-              ),
+          const changedAt = yield* Effect.forEach(
+            entries,
+            (entry) => readNestedChangedAt(cwd, entry.slice(3)),
             { concurrency: 8 },
           );
-          return { relativePath, changedAt: Math.max(...modifiedTimes) };
+          return { relativePath, changedAt: Math.max(...changedAt) };
         }).pipe(Effect.orElseSucceed(() => null)),
       { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
     );
@@ -3362,31 +3375,38 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       .map((repository) => repository.relativePath);
   });
 
+  // Opens the changed repositories among `relativePaths`, the most recently changed first, up to
+  // the review's limit. One that cannot be read, such as a worktree whose main checkout moved, is
+  // left out. Needs a Scope.
+  const openChangedNestedReviews = Effect.fn("openChangedNestedReviews")(function* (
+    root: string,
+    relativePaths: ReadonlyArray<string>,
+    options: { readonly diffArgs: ReadonlyArray<string>; readonly patchLimit: number },
+  ) {
+    const changed = yield* listChangedNestedRepositories(root, relativePaths);
+    const reviews = yield* Effect.forEach(
+      changed.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
+      (relativePath) =>
+        openNestedReview(root, relativePath, null, options).pipe(Effect.orElseSucceed(() => null)),
+      { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
+    );
+    return {
+      reviews: reviews.filter((review): review is NestedReview => review !== null),
+      changedCount: changed.length,
+    };
+  });
+
   const readNestedChangeTotals: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"] =
     Effect.fn("readNestedChangeTotals")(function* (root, repositories) {
-      const changed = yield* listChangedNestedRepositories(root, repositories);
-      const files = yield* Effect.forEach(
-        changed.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
-        (relativePath) =>
-          openNestedReview(root, relativePath, null, {
-            diffArgs: REVIEW_DIFF_ARGS,
-            patchLimit: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
-          }).pipe(
-            Effect.map((review) => review.files),
-            Effect.scoped,
-            Effect.orElseSucceed(() => []),
-          ),
-        { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
-      );
-      if (files.includes(undefined)) return null;
-      let insertions = 0;
-      let deletions = 0;
-      for (const file of files.flatMap((part) => part ?? [])) {
-        insertions += file.additions;
-        deletions += file.deletions;
-      }
-      return { insertions, deletions };
-    });
+      const { reviews } = yield* openChangedNestedReviews(root, repositories, {
+        diffArgs: REVIEW_DIFF_ARGS,
+        patchLimit: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+      });
+      const files = reviews.map((review) => review.files);
+      return files.includes(undefined)
+        ? null
+        : sumReviewFileStats(files.flatMap((part) => part ?? []));
+    }, Effect.scoped);
 
   /**
    * A folder that is not a repository reviews the uncommitted edits of the repositories below
@@ -3398,54 +3418,43 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     input: ReviewDiffPreviewInput,
     options: { readonly diffArgs: ReadonlyArray<string>; readonly patchLimit: number },
   ) {
-    const owner = input.file ? yield* findOwningNestedRepository(input.cwd, input.file.path) : null;
-    const relativePaths = input.file
-      ? owner === null
-        ? []
-        : [owner]
-      : yield* findNestedRepositories(input.cwd);
-    if (relativePaths.length === 0) {
-      return { cwd: input.cwd, generatedAt: yield* DateTime.now, sources: [] };
-    }
-    const changed = input.file
-      ? relativePaths
-      : yield* listChangedNestedRepositories(input.cwd, relativePaths);
-    const { patch, shown } = yield* Effect.gen(function* () {
-      const reviews = yield* Effect.forEach(
-        changed.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
-        (relativePath) =>
-          openNestedReview(input.cwd, relativePath, null, { ...options, file: input.file }).pipe(
-            // The listing leaves out a repository it cannot read, such as a worktree whose main
-            // checkout moved. A per-file request fails like any other.
-            Effect.catch((error) => (input.file ? Effect.fail(error) : Effect.succeed(null))),
-          ),
-        { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
-      );
-      const readable = reviews.filter((review): review is NestedReview => review !== null);
-      const joined = joinReviewPatches(
-        yield* readNestedPatches(readable, options.patchLimit, 0),
+    const result = yield* Effect.gen(function* () {
+      let opened: { readonly reviews: ReadonlyArray<NestedReview>; readonly changedCount: number };
+      if (input.file) {
+        const owner = yield* findOwningNestedRepository(input.cwd, input.file.path);
+        if (owner === null) return null;
+        // A per-file request fails like any other.
+        const review = yield* openNestedReview(input.cwd, owner, null, {
+          ...options,
+          file: input.file,
+        });
+        opened = { reviews: [review], changedCount: 1 };
+      } else {
+        const relativePaths = yield* findNestedRepositories(input.cwd);
+        if (relativePaths.length === 0) return null;
+        opened = yield* openChangedNestedReviews(input.cwd, relativePaths, options);
+      }
+      const patch = joinReviewPatches(
+        yield* readNestedPatches(opened.reviews, options.patchLimit, 0),
         options.patchLimit,
       );
-      return {
-        patch:
-          changed.length > REVIEW_NESTED_REPOSITORY_MAX ? { ...joined, files: undefined } : joined,
-        shown: readable.length,
-      };
+      return { patch, shown: opened.reviews.length, changed: opened.changedCount };
     }).pipe(Effect.scoped);
-    const sources = yield* makeReviewSources(input.cwd, patch, patch, {
+    if (result === null) {
+      return { cwd: input.cwd, generatedAt: yield* DateTime.now, sources: [] };
+    }
+    const sources = yield* makeReviewSources(input.cwd, result.patch, result.patch, {
       title: "Changes",
       baseRef: null,
       headRef: null,
     });
+    const nestedRepositories = { shown: result.shown, changed: result.changed };
     return {
       cwd: input.cwd,
       generatedAt: yield* DateTime.now,
       sources:
-        changed.length > REVIEW_NESTED_REPOSITORY_MAX
-          ? sources.map((source) => ({
-              ...source,
-              nestedRepositories: { shown, changed: changed.length },
-            }))
+        result.changed > result.shown
+          ? sources.map((source) => ({ ...source, nestedRepositories }))
           : sources,
     };
   });

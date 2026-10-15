@@ -8,6 +8,7 @@ import { getCachedReviewParsedDiff } from "./reviewState";
 import {
   applyReviewDiffMetadata,
   buildReviewParsedDiff,
+  getNestedRepositoriesNotice,
   type ReviewParsedDiff,
   type ReviewRenderableFile,
   type ReviewSectionItem,
@@ -247,7 +248,7 @@ export function useReviewDiffData(input: {
       fileCount: files.length,
       additions: files.reduce((total, file) => total + file.additions, 0),
       deletions: files.reduce((total, file) => total + file.deletions, 0),
-      notice: null,
+      notice: getNestedRepositoriesNotice(lazySource),
     };
   }, [lazySource, previewDiff, selectedSection, patches]);
   const headerDiffSummary = useMemo(

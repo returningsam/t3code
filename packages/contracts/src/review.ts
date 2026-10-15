@@ -40,9 +40,9 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   /** Complete statistics, independent of patch limits. Absent on older servers. */
   files: Schema.optionalKey(Schema.Array(ReviewDiffFileStat)),
   /**
-   * For a folder holding more changed repositories than one review reads: how many it shows,
-   * the most recently changed first, and how many have changes. Absent otherwise and on older
-   * servers.
+   * For a folder of repositories whose review leaves some changed ones out, such as past its
+   * limit: how many it shows, the most recently changed first, and how many have changes. `files`
+   * covers the shown ones. Absent otherwise and on older servers.
    */
   nestedRepositories: Schema.optionalKey(
     Schema.Struct({ shown: NonNegativeInt, changed: NonNegativeInt }),
