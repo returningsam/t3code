@@ -197,11 +197,14 @@ describe("GitWorkflowService", () => {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
         const first = yield* workflow.localStatus({ cwd: "/checkouts" });
         yield* workflow.invalidateLocalStatus("/checkouts");
-        // The last totals show while the fresh ones are read.
         const second = yield* workflow.localStatus({ cwd: "/checkouts" });
 
         assert.deepStrictEqual(first.branchChanges, { baseRef: null, insertions: 1, deletions: 0 });
-        assert.deepStrictEqual(second.branchChanges, first.branchChanges);
+        assert.deepStrictEqual(second.branchChanges, {
+          baseRef: null,
+          insertions: 2,
+          deletions: 0,
+        });
         assert.deepStrictEqual(
           [yield* Queue.take(totals.calls), yield* Queue.take(totals.calls)],
           [1, 2],
@@ -212,6 +215,37 @@ describe("GitWorkflowService", () => {
             detect: () => Effect.succeed(null),
             nestedRepositories: ["main"],
             readNestedChangeTotals: totals.read,
+          }),
+        ),
+      );
+    }),
+  );
+
+  it.effect("shows the last nested totals while a refreshed read outlasts the wait", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>();
+      let calls = 0;
+      const readNestedChangeTotals = vi.fn(() => {
+        calls += 1;
+        return calls === 1
+          ? Effect.succeed({ insertions: 1, deletions: 0 })
+          : Deferred.await(gate).pipe(Effect.as({ insertions: 2, deletions: 0 }));
+      });
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const first = yield* workflow.localStatus({ cwd: "/checkouts" });
+        yield* workflow.invalidateLocalStatus("/checkouts");
+        const slow = yield* workflow.localStatus({ cwd: "/checkouts" }).pipe(Effect.forkChild);
+        yield* TestClock.adjust(Duration.seconds(2));
+        const second = yield* Fiber.join(slow);
+
+        assert.deepStrictEqual(second.branchChanges, first.branchChanges);
+      }).pipe(
+        Effect.provide(
+          layer({
+            detect: () => Effect.succeed(null),
+            nestedRepositories: ["main"],
+            readNestedChangeTotals,
           }),
         ),
       );

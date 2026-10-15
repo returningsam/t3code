@@ -231,16 +231,17 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? NESTED_CHANGE_TOTALS_TTL : Duration.zero),
     },
   );
-  // A read that outlasts the wait keeps running, so the next status read shows its totals.
+  // A read that outlasts the wait shows the last totals and keeps running, so the next status
+  // read shows its totals.
   const readNestedChangeTotals = Effect.fn("GitWorkflowService.readNestedChangeTotals")(function* (
     cwd: string,
   ) {
     const read = yield* Cache.get(nestedChangeTotalsCache, cwd).pipe(
       Effect.forkIn(backgroundScope),
     );
-    if (latestNestedChangeTotals.has(cwd)) return latestNestedChangeTotals.get(cwd) ?? null;
     const exit = yield* Fiber.await(read).pipe(Effect.timeoutOption(NESTED_CHANGE_TOTALS_WAIT));
-    return Option.isSome(exit) && Exit.isSuccess(exit.value) ? exit.value.value : null;
+    if (Option.isSome(exit) && Exit.isSuccess(exit.value)) return exit.value.value;
+    return latestNestedChangeTotals.get(cwd) ?? null;
   });
   const readNestedRepositories = Effect.fn("GitWorkflowService.readNestedRepositories")(function* (
     cwd: string,
