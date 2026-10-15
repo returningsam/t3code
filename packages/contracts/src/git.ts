@@ -253,6 +253,12 @@ const VcsStatusLocalShape = {
       deletions: NonNegativeInt,
     }),
   ),
+  /**
+   * True for a folder that is not a repository but holds git repositories one or two folders
+   * down, such as a main checkout and its worktrees. Its Changes view lists their uncommitted
+   * edits. Absent otherwise and on older servers.
+   */
+  hasNestedRepositories: Schema.optional(Schema.Boolean),
 };
 
 const VcsStatusRemoteShape = {

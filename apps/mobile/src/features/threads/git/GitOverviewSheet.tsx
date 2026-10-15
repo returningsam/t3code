@@ -109,6 +109,8 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const gitOperationLabel = gitState.gitOperationLabel;
   const busy = gitOperationLabel !== null;
   const isRepo = gitStatus.data?.isRepo ?? true;
+  // A folder that is not a repository still reviews the repositories below it.
+  const canReview = isRepo || gitStatus.data?.hasNestedRepositories === true;
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
 
@@ -325,7 +327,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           icon="text.bubble"
           title="Review changes"
           subtitle="Inspect changes, uncommitted edits, and turn diffs"
-          disabled={busy || !isRepo}
+          disabled={busy || !canReview}
           onPress={() => {
             const params = { environmentId, threadId };
             navigation.dispatch(

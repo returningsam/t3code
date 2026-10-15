@@ -1899,7 +1899,7 @@ export default function GitActionsControl({
         </ActionGroup>
       )}
 
-      {isPanel && isRepo ? (
+      {isPanel && (isRepo || gitStatus?.hasNestedRepositories) ? (
         <ThreadDetailsControl
           type="button"
           variant="ghost"
@@ -1910,12 +1910,17 @@ export default function GitActionsControl({
         >
           <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
           <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>Changes</span>
-          <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-            <span className="text-success">+{formatDiffCount(changesTotals?.insertions ?? 0)}</span>
-            <span className="text-destructive">
-              -{formatDiffCount(changesTotals?.deletions ?? 0)}
+          {/* Status has no totals for the repositories below a folder that is not one. */}
+          {isRepo ? (
+            <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
+              <span className="text-success">
+                +{formatDiffCount(changesTotals?.insertions ?? 0)}
+              </span>
+              <span className="text-destructive">
+                -{formatDiffCount(changesTotals?.deletions ?? 0)}
+              </span>
             </span>
-          </span>
+          ) : null}
         </ThreadDetailsControl>
       ) : null}
 

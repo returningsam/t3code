@@ -2294,6 +2294,192 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
     );
   });
 
+  describe("nested repositories in review diffs", () => {
+    const sourceOf = (preview: ReviewDiffPreviewResult, kind: "working-tree" | "branch-range") =>
+      preview.sources.find((source) => source.kind === kind)!;
+    const initRepoIn = (cwd: string) =>
+      Effect.gen(function* () {
+        yield* (yield* FileSystem.FileSystem).makeDirectory(cwd, { recursive: true });
+        return yield* initRepoWithCommit(cwd);
+      });
+
+    it.effect(
+      "lists each checkout's uncommitted edits below a folder that is not a repository",
+      () =>
+        Effect.gen(function* () {
+          const root = yield* makeTmpDir();
+          const pathService = yield* Path.Path;
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          const main = pathService.join(root, "main");
+          const worktree = pathService.join(root, "worktrees", "wt-a");
+          yield* initRepoIn(main);
+          yield* git(main, ["worktree", "add", "-b", "wt-a", worktree]);
+          yield* initRepoIn(pathService.join(root, "node_modules", "dep"));
+          yield* writeTextFile(main, "README.md", "# main edit\n");
+          yield* git(worktree, ["mv", "README.md", "GUIDE.md"]);
+          yield* writeTextFile(worktree, "notes.txt", "new\n");
+          yield* writeTextFile(root, "loose.txt", "outside every repository\n");
+
+          assert.deepStrictEqual(yield* driver.findNestedRepositories(root), [
+            "main",
+            "worktrees/wt-a",
+          ]);
+          const preview = yield* driver.getReviewDiffPreview({ cwd: root });
+          const expected = [
+            { path: "main/README.md", previousPath: null, additions: 1, deletions: 1 },
+            {
+              path: "worktrees/wt-a/GUIDE.md",
+              previousPath: "worktrees/wt-a/README.md",
+              additions: 0,
+              deletions: 0,
+            },
+            { path: "worktrees/wt-a/notes.txt", previousPath: null, additions: 1, deletions: 0 },
+          ];
+          for (const kind of ["working-tree", "branch-range"] as const) {
+            assert.deepStrictEqual(sourceOf(preview, kind).files, expected);
+          }
+          const diff = sourceOf(preview, "working-tree").diff;
+          assert.include(diff, "diff --git a/main/README.md b/main/README.md");
+          assert.include(
+            diff,
+            "rename from worktrees/wt-a/README.md\nrename to worktrees/wt-a/GUIDE.md",
+          );
+          assert.include(diff, "+++ b/worktrees/wt-a/notes.txt");
+          assert.notInclude(diff, "loose.txt");
+
+          const scoped = yield* driver.getReviewDiffPreview({
+            cwd: root,
+            file: {
+              path: "worktrees/wt-a/notes.txt",
+              previousPath: null,
+              sourceKind: "branch-range",
+            },
+          });
+          assert.deepStrictEqual(sourceOf(scoped, "branch-range").files, expected.slice(2));
+          assert.include(sourceOf(scoped, "branch-range").diff, "+new");
+          const contents = yield* driver.getReviewDiffFileContents(
+            makeReviewDiffFileContentsInput(root, {
+              sourceKind: "branch-range",
+              baseRef: null,
+              oldPath: "main/README.md",
+              newPath: "main/README.md",
+            }),
+          );
+          assert.deepStrictEqual(contents, {
+            oldContents: "# test\n",
+            newContents: "# main edit\n",
+          });
+        }),
+    );
+
+    it.effect("keeps nested patches within one patch budget and their totals complete", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        for (const name of ["one", "two"]) {
+          yield* initRepoIn(pathService.join(root, name));
+          yield* writeTextFile(root, `${name}/large.txt`, `${"x".repeat(99)}\n`.repeat(700));
+        }
+
+        const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd: root }), "working-tree");
+
+        assert.isTrue(source.truncated);
+        assert.isAtMost(new TextEncoder().encode(source.diff).byteLength, 120_000);
+        assert.deepStrictEqual(source.files, [
+          { path: "one/large.txt", previousPath: null, additions: 700, deletions: 0 },
+          { path: "two/large.txt", previousPath: null, additions: 700, deletions: 0 },
+        ]);
+      }),
+    );
+
+    it.effect("shows an untracked nested repository's edits instead of its commit", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+        const nested = pathService.join(cwd, "nested");
+        yield* initRepoIn(nested);
+        yield* writeTextFile(nested, "README.md", "# nested edit\n");
+        yield* writeTextFile(nested, "untracked.txt", "untracked\n");
+
+        const preview = yield* driver.getReviewDiffPreview({ cwd });
+
+        for (const source of preview.sources) {
+          assert.deepStrictEqual(source.files, [
+            { path: "nested/README.md", previousPath: null, additions: 1, deletions: 1 },
+            { path: "nested/untracked.txt", previousPath: null, additions: 1, deletions: 0 },
+          ]);
+          assert.include(source.diff, "+++ b/nested/untracked.txt");
+          assert.notInclude(source.diff, "Subproject commit");
+        }
+      }),
+    );
+
+    it.effect("leaves out an untracked nested repository with no edits", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+        yield* initRepoIn(pathService.join(cwd, "nested"));
+
+        const preview = yield* driver.getReviewDiffPreview({ cwd });
+
+        for (const source of preview.sources) {
+          assert.deepStrictEqual(source.files, []);
+          assert.strictEqual(source.diff, "");
+        }
+      }),
+    );
+
+    it.effect("compares a moved submodule from the commit its parent pins", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const upstream = yield* makeTmpDir("git-submodule-");
+        yield* initRepoWithCommit(upstream);
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["-c", "protocol.file.allow=always", "submodule", "add", upstream, "sub"]);
+        yield* git(cwd, ["commit", "-m", "add submodule"]);
+        const sub = pathService.join(cwd, "sub");
+        yield* git(sub, ["config", "user.email", "test@test.com"]);
+        yield* git(sub, ["config", "user.name", "Test"]);
+        yield* writeTextFile(sub, "added.txt", "committed in the submodule\n");
+        yield* git(sub, ["add", "added.txt"]);
+        yield* git(sub, ["commit", "-m", "move the pointer"]);
+        yield* writeTextFile(sub, "README.md", "# uncommitted\n");
+
+        const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd }), "working-tree");
+
+        const expected = [
+          { path: "sub/README.md", previousPath: null, additions: 1, deletions: 1 },
+          { path: "sub/added.txt", previousPath: null, additions: 1, deletions: 0 },
+        ];
+        assert.deepStrictEqual(source.files, expected);
+        assert.notInclude(source.diff, "Subproject commit");
+        const scoped = yield* driver.getReviewDiffPreview({
+          cwd,
+          file: { path: "sub/added.txt", previousPath: null, sourceKind: "working-tree" },
+        });
+        assert.deepStrictEqual(sourceOf(scoped, "working-tree").files, expected.slice(1));
+        assert.include(sourceOf(scoped, "working-tree").diff, "+committed in the submodule");
+        const contents = yield* driver.getReviewDiffFileContents(
+          makeReviewDiffFileContentsInput(cwd, {
+            oldPath: "sub/README.md",
+            newPath: "sub/README.md",
+          }),
+        );
+        assert.deepStrictEqual(contents, {
+          oldContents: "# test\n",
+          newContents: "# uncommitted\n",
+        });
+      }),
+    );
+  });
+
   describe("repository status", () => {
     it.effect("reads Changes totals with untracked files when requested", () =>
       Effect.gen(function* () {

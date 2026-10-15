@@ -127,7 +127,7 @@ export class GitWorkflowService extends Context.Service<
   }
 >()("t3/git/GitWorkflowService") {}
 
-function nonRepositoryLocalStatus(): VcsStatusLocalResult {
+function nonRepositoryLocalStatus(nestedRepositories: ReadonlyArray<string>): VcsStatusLocalResult {
   return {
     isRepo: false,
     hasPrimaryRemote: false,
@@ -139,12 +139,13 @@ function nonRepositoryLocalStatus(): VcsStatusLocalResult {
       insertions: 0,
       deletions: 0,
     },
+    ...(nestedRepositories.length > 0 ? { hasNestedRepositories: true } : {}),
   };
 }
 
-function nonRepositoryStatus(): VcsStatusResult {
+function nonRepositoryStatus(nestedRepositories: ReadonlyArray<string>): VcsStatusResult {
   return {
-    ...nonRepositoryLocalStatus(),
+    ...nonRepositoryLocalStatus(nestedRepositories),
     hasUpstream: false,
     aheadCount: 0,
     behindCount: 0,
@@ -347,7 +348,9 @@ export const make = Effect.gen(function* () {
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>
-          isGitRepository ? gitManager.status(input) : Effect.succeed(nonRepositoryStatus()),
+          isGitRepository
+            ? gitManager.status(input)
+            : git.findNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryStatus)),
         ),
       ),
     localStatus: (input) =>
@@ -355,7 +358,7 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((isGitRepository) =>
           isGitRepository
             ? gitManager.localStatus(input)
-            : Effect.succeed(nonRepositoryLocalStatus()),
+            : git.findNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryLocalStatus)),
         ),
       ),
     remoteStatus: (input, options) =>
