@@ -296,6 +296,8 @@ interface ReviewPatch {
 const EMPTY_REVIEW_PATCH: ReviewPatch = { stdout: "", stdoutTruncated: false, files: [] };
 
 interface NestedReview {
+  /** The repository's folder relative to the review root. */
+  readonly relativePath: string;
   readonly files: ReadonlyArray<ReviewDiffFileStat> | undefined;
   /** Reads the prefixed patch once, however many sources show it. Null with no changes. */
   readonly patch: Effect.Effect<
@@ -3207,7 +3209,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
               })),
             ),
           );
-    const review: NestedReview = { files: untracked === null ? undefined : files, patch };
+    const review: NestedReview = {
+      relativePath,
+      files: untracked === null ? undefined : files,
+      patch,
+    };
     return review;
   });
 
@@ -3402,10 +3408,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         diffArgs: REVIEW_DIFF_ARGS,
         patchLimit: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
       });
-      const files = reviews.map((review) => review.files);
-      return files.includes(undefined)
-        ? null
-        : sumReviewFileStats(files.flatMap((part) => part ?? []));
+      return reviews.map((review) => ({
+        path: review.relativePath,
+        totals: review.files === undefined ? null : sumReviewFileStats(review.files),
+      }));
     }, Effect.scoped);
 
   /**
@@ -3430,7 +3436,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         });
         opened = { reviews: [review], changedCount: 1 };
       } else {
-        const relativePaths = yield* findNestedRepositories(input.cwd);
+        const found = yield* findNestedRepositories(input.cwd);
+        // Only the folder's own repositories can be picked, so no request reaches outside it.
+        const picked = input.repositories ? new Set(input.repositories) : null;
+        const relativePaths = picked
+          ? found.filter((relativePath) => picked.has(relativePath))
+          : found;
         if (relativePaths.length === 0) return null;
         opened = yield* openChangedNestedReviews(input.cwd, relativePaths, options);
       }

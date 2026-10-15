@@ -14,6 +14,11 @@ export const ReviewDiffPreviewInput = Schema.Struct({
       sourceKind: Schema.Literals(["working-tree", "branch-range"]),
     }),
   ),
+  /**
+   * For a folder of repositories, reviews only these, by folder relative to `cwd`. A path that
+   * is not one of its repositories is ignored. Older servers review them all.
+   */
+  repositories: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
 });
 export type ReviewDiffPreviewInput = typeof ReviewDiffPreviewInput.Type;
 

@@ -26,6 +26,7 @@ import {
   type VcsInitInput,
   type VcsListRefsInput,
   type VcsListRefsResult,
+  type VcsNestedRepositoryChanges,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
@@ -348,13 +349,13 @@ export class GitVcsDriver extends Context.Service<
      */
     readonly findNestedRepositories: (cwd: string) => Effect.Effect<ReadonlyArray<string>>;
     /**
-     * Totals of the uncommitted edits, untracked files included, of the `repositories` below
-     * `cwd` that its review diff shows. Null when one has too many untracked files to count.
+     * Totals of the uncommitted edits, untracked files included, of each of the `repositories`
+     * below `cwd` that its review diff shows, in the same order.
      */
     readonly readNestedChangeTotals: (
       cwd: string,
       repositories: ReadonlyArray<string>,
-    ) => Effect.Effect<{ readonly insertions: number; readonly deletions: number } | null>;
+    ) => Effect.Effect<ReadonlyArray<VcsNestedRepositoryChanges>>;
     readonly readConfigValue: (
       cwd: string,
       key: string,

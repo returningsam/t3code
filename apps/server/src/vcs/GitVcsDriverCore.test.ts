@@ -2401,6 +2401,38 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reviews only the picked repositories, each within the patch budget", () =>
+      Effect.gen(function* () {
+        const root = yield* makeTmpDir();
+        const outside = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        for (const name of ["one", "two", "three"]) {
+          yield* initRepoIn(pathService.join(root, name));
+          yield* writeTextFile(root, `${name}/large.txt`, `${"x".repeat(99)}\n`.repeat(700));
+        }
+        yield* initRepoWithCommit(outside);
+        yield* writeTextFile(outside, "README.md", "# outside edit\n");
+
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd: root,
+          repositories: ["two", outside, pathService.relative(root, outside), "two/.."],
+        });
+
+        for (const kind of ["working-tree", "branch-range"] as const) {
+          const source = sourceOf(preview, kind);
+          assert.isFalse(source.truncated);
+          assert.deepStrictEqual(source.files, [
+            { path: "two/large.txt", previousPath: null, additions: 700, deletions: 0 },
+          ]);
+          assert.include(source.diff, "+++ b/two/large.txt");
+          assert.notInclude(source.diff, "outside edit");
+        }
+        const unknown = yield* driver.getReviewDiffPreview({ cwd: root, repositories: [outside] });
+        assert.deepStrictEqual(unknown.sources, []);
+      }),
+    );
+
     it.effect("reads only the changed repositories, the most recently changed first", () =>
       Effect.gen(function* () {
         const root = yield* makeTmpDir();
@@ -2432,7 +2464,11 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isUndefined(source.nestedRepositories);
         assert.deepStrictEqual(
           yield* driver.readNestedChangeTotals(root, yield* driver.findNestedRepositories(root)),
-          { insertions: 2, deletions: 2 },
+          [
+            { path: "c-added", totals: { insertions: 1, deletions: 0 } },
+            { path: "d-deleted", totals: { insertions: 0, deletions: 1 } },
+            { path: "a-edited", totals: { insertions: 1, deletions: 1 } },
+          ],
         );
       }),
     );
@@ -2530,7 +2566,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         }
         assert.deepStrictEqual(
           yield* driver.readNestedChangeTotals(root, yield* driver.findNestedRepositories(root)),
-          { insertions: 32, deletions: 32 },
+          shown.map((path) => ({ path, totals: { insertions: 1, deletions: 1 } })),
         );
       }),
     );
@@ -2746,7 +2782,15 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isTrue(source.truncated);
         assert.include(source.diff, "+# one edit");
         assert.include(source.diff, "+# two edit");
-        assert.isNull(yield* driver.readNestedChangeTotals(root, ["one", "two"]));
+        assert.deepStrictEqual(
+          (yield* driver.readNestedChangeTotals(root, ["one", "two"])).toSorted((left, right) =>
+            left.path.localeCompare(right.path),
+          ),
+          [
+            { path: "one", totals: null },
+            { path: "two", totals: { insertions: 1, deletions: 1 } },
+          ],
+        );
       }),
     );
 
