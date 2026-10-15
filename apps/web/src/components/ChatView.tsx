@@ -2303,10 +2303,11 @@ export default function ChatView(props: ChatViewProps) {
   useLayoutEffect(() => {
     const explicitThreadRef = explicitDiffOpenRef.current;
     explicitDiffOpenRef.current = null;
-    // Generic openings always show Changes, including tab fallbacks and thread changes.
-    // A timeline click instead opens the specific turn/file the user requested.
+    // Generic openings always show Changes of every repository, including tab fallbacks and
+    // thread changes. A timeline click or a repository row instead opens what the user requested.
     if (diffOpen && activeThreadRef && explicitThreadRef !== activeThreadRef) {
       useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
+      useDiffPanelStore.getState().selectNestedRepositories(activeThreadRef, []);
     }
   }, [activeThreadRef, diffOpen]);
   const rightPanelState = useRightPanelStore((state) =>
@@ -5448,15 +5449,26 @@ export default function ChatView(props: ChatViewProps) {
     },
     [activeThreadRef, canOperatePreview, openPreview],
   );
-  const addDiffSurface = useCallback(() => {
-    if (!activeThreadRef || !isServerThread || !canReviewGitChanges) return;
-    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
-    useRightPanelStore.getState().open(activeThreadRef, "diff");
-    onDiffPanelOpen?.();
-  }, [activeThreadRef, canReviewGitChanges, isServerThread, onDiffPanelOpen]);
-  const openChangesFromThreadPanel = useCallback(() => {
-    addDiffSurface();
-  }, [addDiffSurface]);
+  // Shows Changes of only these nested repositories, or of all of them when empty.
+  const showChanges = useCallback(
+    (repositories: ReadonlyArray<string>) => {
+      if (!activeThreadRef || !isServerThread || !canReviewGitChanges) return;
+      const diffOpen =
+        selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) ===
+        "diff";
+      explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
+      useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
+      useDiffPanelStore.getState().selectNestedRepositories(activeThreadRef, repositories);
+      useRightPanelStore.getState().open(activeThreadRef, "diff");
+      onDiffPanelOpen?.();
+    },
+    [activeThreadRef, canReviewGitChanges, isServerThread, onDiffPanelOpen],
+  );
+  const addDiffSurface = useCallback(() => showChanges([]), [showChanges]);
+  const openChangesFromThreadPanel = useCallback(
+    (repository?: string) => showChanges(repository ? [repository] : []),
+    [showChanges],
+  );
   const addFilesSurface = useCallback(() => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");

@@ -127,6 +127,7 @@ import {
 import { getSourceControlPresentation, sourceControlIcon } from "~/sourceControlPresentation";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
+import { nestedRepositoryRows } from "~/nestedRepositories.logic";
 import { useOpenLink } from "~/browser/useOpenLink";
 
 interface GitActionsControlProps {
@@ -141,7 +142,8 @@ interface GitActionsControlProps {
   onOpenPullRequest?: ((number: number) => void) | undefined;
   displayMode?: "toolbar" | "panel";
   compact?: boolean;
-  onOpenChanges?: () => void;
+  /** Opens Changes, showing only `repository` of a folder of repositories when given. */
+  onOpenChanges?: (repository?: string) => void;
 }
 
 interface PendingDefaultBranchAction {
@@ -426,6 +428,15 @@ function GitActionProgressButtonContent({
         </div>
       </div>
     </div>
+  );
+}
+
+function ChangeTotals({ insertions, deletions }: { insertions: number; deletions: number }) {
+  return (
+    <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
+      <span className="text-success">+{formatDiffCount(insertions)}</span>
+      <span className="text-destructive">-{formatDiffCount(deletions)}</span>
+    </span>
   );
 }
 
@@ -1159,6 +1170,11 @@ export default function GitActionsControl({
   const gitStatusForActions = gitStatus;
   // Matches the diff panel's Changes view. Older servers only report uncommitted totals.
   const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
+  // A folder of repositories lists its changed ones instead of one Changes row.
+  const nestedRepositoryChanges = isRepo ? undefined : gitStatus?.nestedRepositoryChanges;
+  const nestedRows = nestedRepositoryChanges?.length
+    ? nestedRepositoryRows(nestedRepositoryChanges)
+    : null;
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
@@ -1903,27 +1919,70 @@ export default function GitActionsControl({
       )}
 
       {isPanel && canReviewChanges(isRepo, gitStatus) ? (
-        <ThreadDetailsControl
-          type="button"
-          variant="ghost"
-          size="sm"
-          part="row"
-          disabled={!onOpenChanges}
-          onClick={onOpenChanges}
-        >
-          <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-          <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>Changes</span>
-          {isRepo || gitStatus?.branchChanges ? (
-            <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-              <span className="text-success">
-                +{formatDiffCount(changesTotals?.insertions ?? 0)}
-              </span>
-              <span className="text-destructive">
-                -{formatDiffCount(changesTotals?.deletions ?? 0)}
-              </span>
+        nestedRows ? (
+          <>
+            {nestedRows.rows.map((repository) => (
+              <ThreadDetailsControl
+                key={repository.path}
+                type="button"
+                variant="ghost"
+                size="sm"
+                part="row"
+                aria-label={`Changes in ${repository.path}`}
+                disabled={!onOpenChanges}
+                onClick={() => onOpenChanges?.(repository.path)}
+              >
+                <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-left",
+                    THREAD_DETAILS_PANEL_LABEL_CLASS,
+                  )}
+                >
+                  {repository.path}
+                </span>
+                {repository.totals ? <ChangeTotals {...repository.totals} /> : null}
+              </ThreadDetailsControl>
+            ))}
+            {nestedRows.moreCount > 0 ? (
+              <ThreadDetailsControl
+                type="button"
+                variant="ghost"
+                size="sm"
+                part="row"
+                tone="muted"
+                disabled={!onOpenChanges}
+                onClick={() => onOpenChanges?.()}
+              >
+                <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+                <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+                  {nestedRows.moreCount} more{" "}
+                  {nestedRows.moreCount === 1 ? "repository" : "repositories"}
+                </span>
+              </ThreadDetailsControl>
+            ) : null}
+          </>
+        ) : (
+          <ThreadDetailsControl
+            type="button"
+            variant="ghost"
+            size="sm"
+            part="row"
+            disabled={!onOpenChanges}
+            onClick={() => onOpenChanges?.()}
+          >
+            <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+            <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+              Changes
             </span>
-          ) : null}
-        </ThreadDetailsControl>
+            {isRepo || gitStatus?.branchChanges ? (
+              <ChangeTotals
+                insertions={changesTotals?.insertions ?? 0}
+                deletions={changesTotals?.deletions ?? 0}
+              />
+            ) : null}
+          </ThreadDetailsControl>
+        )
       ) : null}
 
       <Dialog

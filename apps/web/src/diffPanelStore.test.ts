@@ -2,7 +2,11 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, RunId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  selectThreadNestedRepositories,
+  useDiffPanelStore,
+} from "./diffPanelStore";
 
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
 
@@ -11,6 +15,7 @@ describe("diffPanelStore", () => {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      nestedRepositoriesByThreadKey: {},
     }),
   );
 
@@ -121,5 +126,32 @@ describe("diffPanelStore", () => {
       filePath: "src/app.ts",
       revealRequestId: 1,
     });
+  });
+
+  it("keeps each thread's picked nested repositories until they lose their changes", () => {
+    const otherThreadRef = scopeThreadRef(
+      EnvironmentId.make("environment-1"),
+      ThreadId.make("thread-2"),
+    );
+    const store = useDiffPanelStore.getState();
+    const picked = () =>
+      selectThreadNestedRepositories(
+        useDiffPanelStore.getState().nestedRepositoriesByThreadKey,
+        THREAD_REF,
+      );
+    store.selectNestedRepositories(THREAD_REF, ["main", "worktrees/wt-a"]);
+    store.selectNestedRepositories(otherThreadRef, ["main"]);
+
+    store.reconcileNestedRepositories(THREAD_REF, ["worktrees/wt-a", "worktrees/wt-b"]);
+    expect(picked()).toEqual(["worktrees/wt-a"]);
+
+    store.reconcileNestedRepositories(THREAD_REF, ["worktrees/wt-b"]);
+    expect(picked()).toEqual([]);
+    expect(
+      selectThreadNestedRepositories(
+        useDiffPanelStore.getState().nestedRepositoriesByThreadKey,
+        otherThreadRef,
+      ),
+    ).toEqual(["main"]);
   });
 });
