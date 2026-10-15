@@ -16,8 +16,9 @@ When a project holds other git repositories, such as submodules or checkouts cop
 diff panel's **Changes** and **Uncommitted** views list the files changed inside them under each
 repository's folder. A submodule whose checked-out commit moved shows everything since the commit
 the project records for it. A project folder that is not a git repository itself, such as one
-holding a main checkout and its worktrees, lists the uncommitted edits of each repository one or
-two folders below it. Turn diffs still need the project folder to be a git repository.
+holding a main checkout and its worktrees, lists the uncommitted edits of the repositories one or
+two folders below it, the most recently edited first, up to 32 of them. Turn diffs still need the
+project folder to be a git repository.
 
 ## Connect an account
 

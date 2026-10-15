@@ -75,6 +75,10 @@ const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const REVIEW_NESTED_REPOSITORY_CONCURRENCY = 4;
 // A review reads at most this many nested repositories. A folder with more is incomplete.
 const REVIEW_NESTED_REPOSITORY_MAX = 32;
+// A folder's review reads its changed repositories with the newest changed files first. A
+// repository's newest is found among this many of its changed paths.
+const NESTED_REPOSITORY_RECENCY_MAX_PATHS = 100;
+const NESTED_REPOSITORY_STATUS_MAX_OUTPUT_BYTES = 64 * 1024;
 // Finding the repositories below a non-repository folder checks at most this many entries.
 const NESTED_REPOSITORY_SCAN_MAX_ENTRIES = 500;
 // Clients name review paths, so finding the repository that owns one stops at these bounds.
@@ -3308,6 +3312,82 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return sources;
   });
 
+  // The repositories with uncommitted edits or untracked files, the newest changed file first.
+  // A deleted file has no time, so a repository with only deletions sorts last. One that cannot
+  // be read is left out.
+  const listChangedNestedRepositories = Effect.fn("listChangedNestedRepositories")(function* (
+    root: string,
+    relativePaths: ReadonlyArray<string>,
+  ) {
+    const changed = yield* Effect.forEach(
+      relativePaths.filter((relativePath) => !GIT_QUOTED_PATH_CHARACTER.test(relativePath)),
+      (relativePath) =>
+        Effect.gen(function* () {
+          const cwd = path.join(root, relativePath);
+          const status = yield* executeGit(
+            "GitVcsDriver.review.nestedStatus",
+            cwd,
+            [
+              ...NESTED_REPOSITORY_GIT_CONFIG,
+              "status",
+              "--porcelain",
+              "-z",
+              "--no-renames",
+              "--untracked-files=normal",
+            ],
+            {
+              maxOutputBytes: NESTED_REPOSITORY_STATUS_MAX_OUTPUT_BYTES,
+              appendTruncationMarker: true,
+            },
+          );
+          // Each entry is two status letters, a space, and the path.
+          const entries = splitNullSeparatedGitStdoutPaths(status);
+          if (entries.length === 0) return null;
+          const modifiedTimes = yield* Effect.forEach(
+            entries.slice(0, NESTED_REPOSITORY_RECENCY_MAX_PATHS),
+            (entry) =>
+              fileSystem.stat(path.join(cwd, entry.slice(3))).pipe(
+                Effect.map((info) => Option.getOrNull(info.mtime)?.getTime() ?? 0),
+                Effect.orElseSucceed(() => 0),
+              ),
+            { concurrency: 8 },
+          );
+          return { relativePath, changedAt: Math.max(...modifiedTimes) };
+        }).pipe(Effect.orElseSucceed(() => null)),
+      { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
+    );
+    return changed
+      .filter((repository): repository is NonNullable<typeof repository> => repository !== null)
+      .toSorted((left, right) => right.changedAt - left.changedAt)
+      .map((repository) => repository.relativePath);
+  });
+
+  const readNestedChangeTotals: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"] =
+    Effect.fn("readNestedChangeTotals")(function* (root, repositories) {
+      const changed = yield* listChangedNestedRepositories(root, repositories);
+      const files = yield* Effect.forEach(
+        changed.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
+        (relativePath) =>
+          openNestedReview(root, relativePath, null, {
+            diffArgs: REVIEW_DIFF_ARGS,
+            patchLimit: REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES,
+          }).pipe(
+            Effect.map((review) => review.files),
+            Effect.scoped,
+            Effect.orElseSucceed(() => []),
+          ),
+        { concurrency: REVIEW_NESTED_REPOSITORY_CONCURRENCY },
+      );
+      if (files.includes(undefined)) return null;
+      let insertions = 0;
+      let deletions = 0;
+      for (const file of files.flatMap((part) => part ?? [])) {
+        insertions += file.additions;
+        deletions += file.deletions;
+      }
+      return { insertions, deletions };
+    });
+
   /**
    * A folder that is not a repository reviews the uncommitted edits of the repositories below
    * it. Both sources show them, as for a repository with no base to compare with.
@@ -3327,9 +3407,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (relativePaths.length === 0) {
       return { cwd: input.cwd, generatedAt: yield* DateTime.now, sources: [] };
     }
-    const result = yield* Effect.gen(function* () {
+    const changed = input.file
+      ? relativePaths
+      : yield* listChangedNestedRepositories(input.cwd, relativePaths);
+    const { patch, shown } = yield* Effect.gen(function* () {
       const reviews = yield* Effect.forEach(
-        relativePaths.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
+        changed.slice(0, REVIEW_NESTED_REPOSITORY_MAX),
         (relativePath) =>
           openNestedReview(input.cwd, relativePath, null, { ...options, file: input.file }).pipe(
             // The listing leaves out a repository it cannot read, such as a worktree whose main
@@ -3343,18 +3426,27 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         yield* readNestedPatches(readable, options.patchLimit, 0),
         options.patchLimit,
       );
-      return relativePaths.length > REVIEW_NESTED_REPOSITORY_MAX
-        ? { ...joined, files: undefined }
-        : joined;
+      return {
+        patch:
+          changed.length > REVIEW_NESTED_REPOSITORY_MAX ? { ...joined, files: undefined } : joined,
+        shown: readable.length,
+      };
     }).pipe(Effect.scoped);
+    const sources = yield* makeReviewSources(input.cwd, patch, patch, {
+      title: "Changes",
+      baseRef: null,
+      headRef: null,
+    });
     return {
       cwd: input.cwd,
       generatedAt: yield* DateTime.now,
-      sources: yield* makeReviewSources(input.cwd, result, result, {
-        title: "Changes",
-        baseRef: null,
-        headRef: null,
-      }),
+      sources:
+        changed.length > REVIEW_NESTED_REPOSITORY_MAX
+          ? sources.map((source) => ({
+              ...source,
+              nestedRepositories: { shown, changed: changed.length },
+            }))
+          : sources,
     };
   });
 
@@ -4658,6 +4750,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     getReviewDiffPreview,
     getReviewDiffFileContents,
     findNestedRepositories,
+    readNestedChangeTotals,
     readConfigValue,
     listRefs,
     createWorktree: (input, options) =>

@@ -1,8 +1,11 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
 
 import { VcsRepositoryDetectionError } from "@t3tools/contracts";
 
@@ -19,6 +22,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 function layer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
   readonly nestedRepositories?: ReadonlyArray<string>;
+  readonly readNestedChangeTotals?: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"];
 }) {
   return GitWorkflowService.layer.pipe(
     Layer.provide(
@@ -29,6 +33,8 @@ function layer(input: {
     Layer.provide(
       Layer.mock(GitVcsDriver.GitVcsDriver)({
         findNestedRepositories: () => Effect.succeed(input.nestedRepositories ?? []),
+        readNestedChangeTotals:
+          input.readNestedChangeTotals ?? (() => Effect.succeed({ insertions: 0, deletions: 0 })),
       }),
     ),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
@@ -136,6 +142,50 @@ describe("GitWorkflowService", () => {
         layer({
           detect: () => Effect.succeed(null),
           nestedRepositories: ["main", "worktrees/wt-a"],
+        }),
+      ),
+    ),
+  );
+
+  it.effect("reuses the totals of nested repositories' edits across status reads", () => {
+    const readNestedChangeTotals = vi.fn((cwd: string, repositories: ReadonlyArray<string>) =>
+      Effect.succeed({ insertions: cwd.length, deletions: repositories.length }),
+    );
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const local = yield* workflow.localStatus({ cwd: "/checkouts" });
+      const full = yield* workflow.status({ cwd: "/checkouts" });
+
+      const expected = { baseRef: null, insertions: "/checkouts".length, deletions: 2 };
+      assert.deepStrictEqual(local.branchChanges, expected);
+      assert.deepStrictEqual(full.branchChanges, expected);
+      assert.equal(readNestedChangeTotals.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+          nestedRepositories: ["main", "worktrees/wt-a"],
+          readNestedChangeTotals,
+        }),
+      ),
+    );
+  });
+
+  it.effect("leaves out nested totals that take too long to read", () =>
+    Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const fiber = yield* workflow.localStatus({ cwd: "/checkouts" }).pipe(Effect.forkChild);
+      yield* TestClock.adjust(Duration.seconds(2));
+      const local = yield* Fiber.join(fiber);
+
+      assert.isTrue(local.hasNestedRepositories);
+      assert.isUndefined(local.branchChanges);
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+          nestedRepositories: ["main"],
+          readNestedChangeTotals: () => Effect.never,
         }),
       ),
     ),

@@ -244,7 +244,9 @@ const VcsStatusLocalShape = {
   }),
   /**
    * Totals for the diff panel's Changes view: merge-base with the base branch to the
-   * working tree, untracked files included. Absent on older servers.
+   * working tree, untracked files included. For a folder with nested repositories, the
+   * uncommitted edits of the repositories that view shows, with a null `baseRef`. Absent on
+   * older servers.
    */
   branchChanges: Schema.optional(
     Schema.Struct({

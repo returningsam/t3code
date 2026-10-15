@@ -1069,8 +1069,14 @@ export default function DiffPanel({
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
             {isSelectedPatchTruncated && !lazySource && (
               <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
-                This preview exceeds the size limit. Changes shown are incomplete.
-                {selectedGitSource?.files ? " Totals include all changes." : ""}
+                {selectedGitSource?.nestedRepositories ? (
+                  `Showing ${selectedGitSource.nestedRepositories.shown} of ${selectedGitSource.nestedRepositories.changed} repositories with changes, most recent first.`
+                ) : (
+                  <>
+                    This preview exceeds the size limit. Changes shown are incomplete.
+                    {selectedGitSource?.files ? " Totals include all changes." : ""}
+                  </>
+                )}
               </p>
             )}
             {selectedPatchError && !renderablePatch && (

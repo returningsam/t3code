@@ -344,4 +344,26 @@ describe("applyReviewDiffMetadata", () => {
     expect(result.notice).toContain("Counts include all changes");
     expect(applyReviewDiffMetadata(parsed, null)).toEqual(parsed);
   });
+
+  it("names how many changed repositories a folder's preview leaves out", () => {
+    const diff = "diff --git a/main/a.ts b/main/a.ts\n--- a/main/a.ts\n+++ b/main/a.ts";
+    const source: ReviewDiffPreviewSource = {
+      id: "branch-range",
+      kind: "branch-range",
+      title: "Changes",
+      baseRef: null,
+      headRef: null,
+      diff,
+      diffHash: "hash",
+      truncated: true,
+      nestedRepositories: { shown: 32, changed: 75 },
+    };
+    const result = applyReviewDiffMetadata(buildReviewParsedDiff(diff, "folder"), {
+      truncated: true,
+      source,
+    });
+    expect(result.kind).toBe("files");
+    if (result.kind !== "files") return;
+    expect(result.notice).toBe("Showing 32 of 75 repositories with changes, most recent first.");
+  });
 });

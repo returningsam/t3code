@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
 import { VcsError } from "./vcs.ts";
 
@@ -39,6 +39,14 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   truncated: Schema.Boolean,
   /** Complete statistics, independent of patch limits. Absent on older servers. */
   files: Schema.optionalKey(Schema.Array(ReviewDiffFileStat)),
+  /**
+   * For a folder holding more changed repositories than one review reads: how many it shows,
+   * the most recently changed first, and how many have changes. Absent otherwise and on older
+   * servers.
+   */
+  nestedRepositories: Schema.optionalKey(
+    Schema.Struct({ shown: NonNegativeInt, changed: NonNegativeInt }),
+  ),
 });
 export type ReviewDiffPreviewSource = typeof ReviewDiffPreviewSource.Type;
 

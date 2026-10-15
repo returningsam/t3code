@@ -130,13 +130,20 @@ export class GitWorkflowService extends Context.Service<
 >()("t3/git/GitWorkflowService") {}
 
 // Status refreshes on focus, git actions, and turn ends, so a folder's scan for nested
-// repositories is reused for a while. A folder too slow to scan, such as a dead network mount,
-// reads as having none.
+// repositories and the totals of their edits are reused for a while. A folder too slow to
+// scan, such as a dead network mount, reads as having none, and totals too slow to read are
+// left out.
 const NESTED_REPOSITORY_SCAN_TTL = Duration.seconds(30);
 const NESTED_REPOSITORY_SCAN_TIMEOUT = Duration.millis(1500);
+const NESTED_REPOSITORY_TOTALS_TIMEOUT = Duration.seconds(2);
 const NESTED_REPOSITORY_SCAN_CACHE_CAPACITY = 256;
 
-function nonRepositoryLocalStatus(hasNestedRepositories: boolean): VcsStatusLocalResult {
+interface NestedRepositories {
+  /** Null when they could not be counted or took too long to read. */
+  readonly changes: { readonly insertions: number; readonly deletions: number } | null;
+}
+
+function nonRepositoryLocalStatus(nested: NestedRepositories | null): VcsStatusLocalResult {
   return {
     isRepo: false,
     hasPrimaryRemote: false,
@@ -148,13 +155,14 @@ function nonRepositoryLocalStatus(hasNestedRepositories: boolean): VcsStatusLoca
       insertions: 0,
       deletions: 0,
     },
-    ...(hasNestedRepositories ? { hasNestedRepositories } : {}),
+    ...(nested?.changes ? { branchChanges: { baseRef: null, ...nested.changes } } : {}),
+    ...(nested ? { hasNestedRepositories: true } : {}),
   };
 }
 
-function nonRepositoryStatus(hasNestedRepositories: boolean): VcsStatusResult {
+function nonRepositoryStatus(nested: NestedRepositories | null): VcsStatusResult {
   return {
-    ...nonRepositoryLocalStatus(hasNestedRepositories),
+    ...nonRepositoryLocalStatus(nested),
     hasUpstream: false,
     aheadCount: 0,
     behindCount: 0,
@@ -179,20 +187,28 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const nestedRepositoriesCache = yield* Cache.makeWith(
-    (cwd: string) =>
-      git.findNestedRepositories(cwd).pipe(
+    Effect.fnUntraced(function* (cwd: string) {
+      const repositories = yield* git.findNestedRepositories(cwd).pipe(
         Effect.timeoutOrElse({
           duration: NESTED_REPOSITORY_SCAN_TIMEOUT,
           orElse: () => Effect.succeed([]),
         }),
-        Effect.map((repositories) => repositories.length > 0),
-      ),
+      );
+      if (repositories.length === 0) return null;
+      const changes = yield* git.readNestedChangeTotals(cwd, repositories).pipe(
+        Effect.timeoutOrElse({
+          duration: NESTED_REPOSITORY_TOTALS_TIMEOUT,
+          orElse: () => Effect.succeed(null),
+        }),
+      );
+      return { changes };
+    }),
     {
       capacity: NESTED_REPOSITORY_SCAN_CACHE_CAPACITY,
       timeToLive: () => NESTED_REPOSITORY_SCAN_TTL,
     },
   );
-  const hasNestedRepositories = (cwd: string) => Cache.get(nestedRepositoriesCache, cwd);
+  const readNestedRepositories = (cwd: string) => Cache.get(nestedRepositoriesCache, cwd);
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -374,7 +390,7 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((isGitRepository) =>
           isGitRepository
             ? gitManager.status(input)
-            : hasNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryStatus)),
+            : readNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryStatus)),
         ),
       ),
     localStatus: (input) =>
@@ -382,7 +398,7 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((isGitRepository) =>
           isGitRepository
             ? gitManager.localStatus(input)
-            : hasNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryLocalStatus)),
+            : readNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryLocalStatus)),
         ),
       ),
     remoteStatus: (input, options) =>
