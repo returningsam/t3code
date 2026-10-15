@@ -13,6 +13,13 @@ export function nestedRepositoryRows(changes: ReadonlyArray<VcsNestedRepositoryC
   };
 }
 
+/** The only changed repository, which the Changes row names instead of listing it below. */
+export function soleNestedRepository(
+  changes: ReadonlyArray<VcsNestedRepositoryChanges> | undefined,
+): VcsNestedRepositoryChanges | null {
+  return changes?.length === 1 ? changes[0]! : null;
+}
+
 /** The picked repositories that still have changes. Empty means every repository. */
 export function reconcileNestedRepositorySelection(
   selected: ReadonlyArray<string>,

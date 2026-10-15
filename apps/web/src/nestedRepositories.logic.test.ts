@@ -4,6 +4,7 @@ import {
   nestedRepositoryRows,
   nestedRepositorySelectionLabel,
   reconcileNestedRepositorySelection,
+  soleNestedRepository,
   toggleNestedRepository,
 } from "./nestedRepositories.logic";
 
@@ -30,6 +31,18 @@ describe("nestedRepositoryRows", () => {
   it("has no more row when every repository fits", () => {
     expect(nestedRepositoryRows(changes(5)).moreCount).toBe(0);
     expect(nestedRepositoryRows(changes(2))).toEqual({ rows: changes(2), moreCount: 0 });
+  });
+});
+
+describe("soleNestedRepository", () => {
+  it("returns the repository when it is the only one with changes", () => {
+    expect(soleNestedRepository(changes(1))).toEqual(changes(1)[0]);
+  });
+
+  it("returns null for none or several", () => {
+    expect(soleNestedRepository(undefined)).toBeNull();
+    expect(soleNestedRepository([])).toBeNull();
+    expect(soleNestedRepository(changes(2))).toBeNull();
   });
 });
 

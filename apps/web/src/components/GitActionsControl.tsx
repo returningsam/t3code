@@ -128,7 +128,7 @@ import {
 import { getSourceControlPresentation, sourceControlIcon } from "~/sourceControlPresentation";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
-import { nestedRepositoryRows } from "~/nestedRepositories.logic";
+import { nestedRepositoryRows, soleNestedRepository } from "~/nestedRepositories.logic";
 import { useOpenLink } from "~/browser/useOpenLink";
 
 interface GitActionsControlProps {
@@ -1173,9 +1173,11 @@ export default function GitActionsControl({
   const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
   // A folder of repositories also lists its changed ones under the Changes row.
   const nestedRepositoryChanges = isRepo ? undefined : gitStatus?.nestedRepositoryChanges;
-  const nestedRows = nestedRepositoryChanges?.length
-    ? nestedRepositoryRows(nestedRepositoryChanges)
-    : null;
+  const soleRepository = soleNestedRepository(nestedRepositoryChanges);
+  const nestedRows =
+    nestedRepositoryChanges?.length && !soleRepository
+      ? nestedRepositoryRows(nestedRepositoryChanges)
+      : null;
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
@@ -1930,10 +1932,26 @@ export default function GitActionsControl({
             onClick={() => onOpenChanges?.()}
           >
             <FileDiffIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-            <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
-              Changes
-            </span>
-            {isRepo || gitStatus?.branchChanges ? (
+            {soleRepository ? (
+              <span className="flex min-w-0 flex-1 items-center text-left">
+                <span
+                  className={cn("shrink-0 whitespace-nowrap", THREAD_DETAILS_PANEL_LABEL_CLASS)}
+                >
+                  Changes (
+                </span>
+                <MiddleTruncate value={soleRepository.path} variant="cap-aligned" />
+                <span className={cn("shrink-0", THREAD_DETAILS_PANEL_LABEL_CLASS)}>)</span>
+              </span>
+            ) : (
+              <span className={cn("flex-1 text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+                Changes
+              </span>
+            )}
+            {soleRepository ? (
+              soleRepository.totals ? (
+                <ChangeTotals {...soleRepository.totals} />
+              ) : null
+            ) : isRepo || gitStatus?.branchChanges ? (
               <ChangeTotals
                 insertions={changesTotals?.insertions ?? 0}
                 deletions={changesTotals?.deletions ?? 0}
