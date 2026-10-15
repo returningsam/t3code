@@ -9,6 +9,7 @@ import {
   PERSISTED_STATE_KEY,
   type PersistedUiState,
   persistState,
+  renameProjectOrderKey,
   reorderProjects,
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
@@ -117,6 +118,19 @@ describe("uiStateStore pure functions", () => {
     expect(reorderProjects(state, currentOrder, ["env-local:proj-a"], ["env-local:proj-a"])).toBe(
       state,
     );
+  });
+
+  it("keeps a moved project's sidebar position under its new key", () => {
+    const state = makeUiState({
+      projectOrder: ["env:/a", "env:/old", "env:/new", "env:/b"],
+    });
+
+    expect(renameProjectOrderKey(state, "env:/old", "env:/new").projectOrder).toEqual([
+      "env:/a",
+      "env:/new",
+      "env:/b",
+    ]);
+    expect(renameProjectOrderKey(state, "env:/missing", "env:/c")).toBe(state);
   });
 
   it("stores explicit changed-file expansion choices", () => {

@@ -9,10 +9,22 @@ export interface CommandPaletteLinkedThreads {
 // without owning its React state.
 const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
 
+/** Opens the Add project folder browser on one environment and hands the chosen folder back. */
+export interface CommandPaletteFolderPick {
+  readonly environmentId: EnvironmentId;
+  /** The browser starts in this folder's parent. */
+  readonly currentPath?: string;
+  /** Replaces the folder list's heading. */
+  readonly label: string;
+  /** Runs after the palette closes. Dismissing the palette never calls it. */
+  readonly onPick: (path: string) => void;
+}
+
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-project" | "new-thread-in";
   readonly query?: string;
   readonly linkedThreads?: CommandPaletteLinkedThreads;
+  readonly pickFolder?: CommandPaletteFolderPick;
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

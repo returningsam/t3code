@@ -1,5 +1,5 @@
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
-import type { CommandPaletteLinkedThreads } from "../commandPaletteBus";
+import type { CommandPaletteFolderPick, CommandPaletteLinkedThreads } from "../commandPaletteBus";
 import {
   type EnvironmentId,
   type FilesystemBrowseEntry,
@@ -7,6 +7,10 @@ import {
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
+import {
+  ensureBrowseDirectoryPath,
+  getBrowseParentPath,
+} from "@t3tools/client-runtime/state/projects";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
@@ -66,7 +70,8 @@ export type CommandPaletteOpenIntent =
       readonly kind: "search";
       readonly query: string;
       readonly linkedThreads?: CommandPaletteLinkedThreads;
-    };
+    }
+  | { readonly kind: "pick-folder"; readonly pick: CommandPaletteFolderPick };
 
 export interface CommandPaletteUiState {
   readonly open: boolean;
@@ -83,6 +88,7 @@ export type CommandPaletteUiAction =
       readonly linkedThreads?: CommandPaletteLinkedThreads;
     }
   | { readonly _tag: "OpenAddProject" }
+  | { readonly _tag: "OpenPickFolder"; readonly pick: CommandPaletteFolderPick }
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "OpenChangeTheme" }
   | { readonly _tag: "ClearOpenIntent" };
@@ -112,6 +118,12 @@ export function reduceCommandPaletteUiState(
       };
     case "OpenAddProject":
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
+    case "OpenPickFolder":
+      return {
+        open: true,
+        mode: "command",
+        openIntent: { kind: "pick-folder", pick: action.pick },
+      };
     case "OpenNewThreadIn":
       return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };
     case "OpenChangeTheme":
@@ -119,6 +131,19 @@ export function reduceCommandPaletteUiState(
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }
+}
+
+/**
+ * The folder picker opens on the current folder's parent so its siblings are
+ * listed, and on the default browse folder when there is no current folder.
+ */
+export function getFolderPickInitialQuery(
+  currentPath: string | undefined,
+  defaultQuery: string,
+): string {
+  const trimmed = currentPath?.trim() ?? "";
+  if (trimmed.length === 0) return defaultQuery;
+  return getBrowseParentPath(trimmed) ?? ensureBrowseDirectoryPath(trimmed);
 }
 
 export interface CommandPaletteThreadContentMatch {

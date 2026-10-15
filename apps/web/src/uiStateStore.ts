@@ -423,6 +423,19 @@ export function reorderProjects(
   };
 }
 
+/** Keeps a project's manual sidebar position when its order key changes, e.g. after its folder moves. */
+export function renameProjectOrderKey(state: UiState, fromKey: string, toKey: string): UiState {
+  if (fromKey === toKey || !state.projectOrder.includes(fromKey)) {
+    return state;
+  }
+  return {
+    ...state,
+    projectOrder: state.projectOrder.flatMap((key) =>
+      key === fromKey ? [toKey] : key === toKey ? [] : [key],
+    ),
+  };
+}
+
 interface UiStateStore extends UiState {
   markThreadVisited: (threadId: string, visitedAt: string) => void;
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
@@ -436,6 +449,7 @@ interface UiStateStore extends UiState {
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
   ) => void;
+  renameProjectOrderKey: (fromKey: string, toKey: string) => void;
 }
 
 export const useUiStateStore = create<UiStateStore>((set) => ({
@@ -457,6 +471,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),
     ),
+  renameProjectOrderKey: (fromKey, toKey) =>
+    set((state) => renameProjectOrderKey(state, fromKey, toKey)),
 }));
 
 useUiStateStore.subscribe((state) => debouncedPersistState.maybeExecute(state));

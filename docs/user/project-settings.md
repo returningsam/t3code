@@ -119,6 +119,12 @@ checkouts and removal. Actions belong to a project: editing them creates the pro
 on each selected environment, and reset returns to the environment's shared list. A project's
 `t3.json` actions can be imported there.
 
+If a checkout's folder moved, or you want it to use another folder on the same machine, choose
+**Change…** beside it in **Checkouts** on web or desktop. This points the checkout at the folder
+and doesn't move any files. The folder must already exist and can't belong to another project.
+Threads that don't run in a worktree use the new folder, and earlier turn diffs may not load if
+the new folder is a different repository.
+
 Settings a repository can also declare in `t3.json`, such as the workspace for new threads,
 resolve in one order: a project override, then the environment setting, then `t3.json`, then the
 built-in default. Leave a setting on **Inherit** to let the next tier decide.

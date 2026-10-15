@@ -17,8 +17,12 @@ import * as Cause from "effect/Cause";
 import { InfoIcon, Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { openCommandPalette } from "../../commandPaletteBus";
 import { useComposerDraftStore } from "../../composerDraftStore";
+import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
+import { normalizeProjectPathForComparison } from "../../lib/projectPaths";
+import { derivePhysicalProjectKeyFromPath } from "../../logicalProject";
 import { readLocalApi } from "../../localApi";
 import {
   type SidebarProjectGroupMember,
@@ -27,6 +31,7 @@ import {
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useThreadShells } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
+import { useUiStateStore } from "../../uiStateStore";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -85,7 +90,8 @@ export function ProjectSettingsPanel({
   );
 
   // Remember the members of the last rendered group so a grouping-rule change
-  // (which changes the group key) can follow the project to its new group.
+  // (which changes the group key) or a folder change (which changes the
+  // checkout key) can follow the project by id to where it now lives.
   const lastSelectionRef = useRef<{
     key: string;
     environmentId: EnvironmentId | null;
@@ -98,12 +104,12 @@ export function ProjectSettingsPanel({
       key: selected.projectKey,
       environmentId,
       checkoutKey,
-      memberKeys: members.map((member) => member.physicalProjectKey),
+      memberKeys: members.map(memberKey),
     };
   }, [selected, members, environmentId, checkoutKey]);
 
-  // A grouping-rule change replaces the group key mid-visit; follow the
-  // project to its new key instead of parking on the not-found state.
+  // A grouping-rule or folder change replaces the keys mid-visit; follow the
+  // project to its new keys instead of parking on the not-found state.
   useEffect(() => {
     if (members.length > 0) return;
     const last = lastSelectionRef.current;
@@ -113,20 +119,22 @@ export function ProjectSettingsPanel({
       last.checkoutKey !== checkoutKey
     )
       return;
-    const successor = groups.find((group) =>
-      group.memberProjects.some((member) => last.memberKeys.includes(member.physicalProjectKey)),
-    );
-    if (successor) {
+    for (const group of groups) {
+      const member = group.memberProjects.find((candidate) =>
+        last.memberKeys.includes(memberKey(candidate)),
+      );
+      if (!member) continue;
       void navigate({
         to: pathname,
         search: () => ({
-          project: successor.projectKey,
+          project: group.projectKey,
           machine: environmentId ?? undefined,
-          checkout: checkoutKey ?? undefined,
+          checkout: checkoutKey === null ? undefined : member.physicalProjectKey,
         }),
         replace: true,
         hashScrollIntoView: false,
       });
+      return;
     }
   }, [groups, navigate, pathname, projectKey, members.length, environmentId, checkoutKey]);
 
@@ -422,6 +430,88 @@ function ProjectDetail({
     ],
   );
 
+  const groupingOverrides = useClientSettings(
+    (settings) => settings.sidebarProjectGroupingOverrides,
+  );
+  const updateClientSettings = useUpdateClientSettings();
+  const renameProjectOrderKey = useUiStateStore((state) => state.renameProjectOrderKey);
+
+  const setCheckoutFolder = useCallback(
+    async (member: SidebarProjectGroupMember, workspaceRoot: string) => {
+      const failureTitle = "Failed to change checkout folder";
+      if (
+        normalizeProjectPathForComparison(workspaceRoot) ===
+        normalizeProjectPathForComparison(member.workspaceRoot)
+      ) {
+        return;
+      }
+      if (checkProjectAccess([member], failureTitle)) return;
+      const api = readLocalApi();
+      if (!api) return;
+      const confirmed = await settlePromise(() =>
+        api.dialogs.confirm(
+          [
+            `Change the folder for "${member.title}"?`,
+            `From: ${member.workspaceRoot}`,
+            `To: ${workspaceRoot}`,
+            "Threads that run in the project folder itself will use the new folder.",
+            "Earlier turn diffs may not load if the new folder is a different repository.",
+          ].join("\n"),
+        ),
+      );
+      if (confirmed._tag === "Failure" || !confirmed.value) return;
+      if (checkProjectAccess([member], failureTitle)) return;
+      const result = await updateProject({
+        environmentId: member.environmentId,
+        input: { projectId: member.id, workspaceRoot },
+      });
+      if (result._tag !== "Success") {
+        reportFailure(
+          failureTitle,
+          mapAtomCommandResult(result, () => undefined),
+        );
+        return;
+      }
+      // Sidebar order and grouping overrides are keyed by folder.
+      const previousKey = member.physicalProjectKey;
+      const nextKey = derivePhysicalProjectKeyFromPath(
+        member.environmentId,
+        result.value.workspaceRoot,
+      );
+      renameProjectOrderKey(previousKey, nextKey);
+      const groupingOverride = groupingOverrides[previousKey];
+      if (groupingOverride !== undefined) {
+        const { [previousKey]: _previous, ...otherOverrides } = groupingOverrides;
+        updateClientSettings({
+          sidebarProjectGroupingOverrides: { ...otherOverrides, [nextKey]: groupingOverride },
+        });
+      }
+    },
+    [
+      checkProjectAccess,
+      groupingOverrides,
+      renameProjectOrderKey,
+      reportFailure,
+      updateClientSettings,
+      updateProject,
+    ],
+  );
+
+  const pickCheckoutFolder = useCallback(
+    (member: SidebarProjectGroupMember) => {
+      if (checkProjectAccess([member], "Failed to change checkout folder")) return;
+      openCommandPalette({
+        pickFolder: {
+          environmentId: member.environmentId,
+          currentPath: member.workspaceRoot,
+          label: `New folder for ${member.title}`,
+          onPick: (path) => void setCheckoutFolder(member, path),
+        },
+      });
+    },
+    [checkProjectAccess, setCheckoutFolder],
+  );
+
   const checkoutChoices = (
     <SettingsSection title="Checkouts">
       {group.memberProjects.map((member) => (
@@ -430,15 +520,30 @@ function ProjectDetail({
           title={member.environmentLabel ?? "Environment"}
           description={member.workspaceRoot}
           control={
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!editableIds.has(member.environmentId)}
-              onClick={() => void removeMembers([member])}
-              aria-label={`Remove checkout ${member.workspaceRoot}`}
-            >
-              Remove
-            </Button>
+            <div className="flex items-center gap-2">
+              {member.isScratch ? null : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!editableIds.has(member.environmentId)}
+                  onClick={() => pickCheckoutFolder(member)}
+                  aria-label={`Change folder of checkout ${member.workspaceRoot}`}
+                >
+                  Change…
+                </Button>
+              )}
+              {hasMultipleCheckouts ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!editableIds.has(member.environmentId)}
+                  onClick={() => void removeMembers([member])}
+                  aria-label={`Remove checkout ${member.workspaceRoot}`}
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           }
         />
       ))}
@@ -538,7 +643,7 @@ function ProjectDetail({
         </SettingsSection>
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
-        {hasMultipleCheckouts ? checkoutChoices : null}
+        {checkoutChoices}
         <SettingsSection title="Danger">
           <SettingsRow
             title={
