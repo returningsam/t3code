@@ -5,6 +5,7 @@ import {
   nestedRepositorySelectionLabel,
   reconcileNestedRepositorySelection,
   soleNestedRepository,
+  toggleAllNestedRepositories,
   toggleNestedRepository,
 } from "./nestedRepositories.logic";
 
@@ -57,11 +58,15 @@ describe("reconcileNestedRepositorySelection", () => {
   it("falls back to every repository when none of the picked ones remain", () => {
     expect(reconcileNestedRepositorySelection(["gone"], ["a", "b"])).toEqual([]);
   });
+
+  it("shows every repository when the remaining picks cover all of them", () => {
+    expect(reconcileNestedRepositorySelection(["a", "b"], ["a", "b"])).toEqual([]);
+  });
 });
 
 describe("toggleNestedRepository", () => {
-  it("narrows every repository to the one picked", () => {
-    expect(toggleNestedRepository([], ["a", "b", "c"], "b")).toEqual(["b"]);
+  it("unchecks one repository from all of them, leaving the others", () => {
+    expect(toggleNestedRepository([], ["a", "b", "c"], "b")).toEqual(["a", "c"]);
   });
 
   it("adds and removes picks", () => {
@@ -69,9 +74,23 @@ describe("toggleNestedRepository", () => {
     expect(toggleNestedRepository(["b", "a"], ["a", "b", "c"], "b")).toEqual(["a"]);
   });
 
-  it("shows every repository after the last pick is removed or the last one is added", () => {
-    expect(toggleNestedRepository(["b"], ["a", "b", "c"], "b")).toEqual([]);
+  it("selects all once every repository is checked", () => {
     expect(toggleNestedRepository(["a", "b"], ["a", "b", "c"], "c")).toEqual([]);
+  });
+
+  it("falls back to the most recently edited repository when the last pick is removed", () => {
+    expect(toggleNestedRepository(["b"], ["c", "a", "b"], "b")).toEqual(["c"]);
+    expect(toggleNestedRepository(["c"], ["c", "a", "b"], "c")).toEqual(["c"]);
+  });
+});
+
+describe("toggleAllNestedRepositories", () => {
+  it("selects only the most recently edited repository when all are selected", () => {
+    expect(toggleAllNestedRepositories([], ["c", "a", "b"])).toEqual(["c"]);
+  });
+
+  it("selects all from a partial selection", () => {
+    expect(toggleAllNestedRepositories(["a"], ["c", "a", "b"])).toEqual([]);
   });
 });
 
