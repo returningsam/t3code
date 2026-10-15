@@ -224,6 +224,17 @@ const VcsStatusChangeRequest = Schema.Struct({
   updatedAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
+export const VcsNestedRepositoryChanges = Schema.Struct({
+  /** The repository's folder relative to the status cwd, with `/` separators. */
+  path: Schema.NonEmptyString,
+  /**
+   * Null when the repository has too many untracked files to count, or is past the number of
+   * repositories the Changes view reads.
+   */
+  totals: Schema.NullOr(Schema.Struct({ insertions: NonNegativeInt, deletions: NonNegativeInt })),
+});
+export type VcsNestedRepositoryChanges = typeof VcsNestedRepositoryChanges.Type;
+
 const VcsStatusLocalShape = {
   isRepo: Schema.Boolean,
   sourceControlProvider: Schema.optional(SourceControlProviderInfo),
@@ -261,6 +272,11 @@ const VcsStatusLocalShape = {
    * edits. Absent otherwise and on older servers.
    */
   hasNestedRepositories: Schema.optional(Schema.Boolean),
+  /**
+   * For a folder with nested repositories, each one with uncommitted edits or untracked files,
+   * the most recently edited first. Absent until they are read and on older servers.
+   */
+  nestedRepositoryChanges: Schema.optional(Schema.Array(VcsNestedRepositoryChanges)),
 };
 
 const VcsStatusRemoteShape = {

@@ -273,6 +273,8 @@ describe("applyGitStatusStreamEvent", () => {
         insertions: 1,
         deletions: 0,
       },
+      hasNestedRepositories: true,
+      nestedRepositoryChanges: [{ path: "nested", totals: { insertions: 1, deletions: 0 } }],
       hasUpstream: false,
       aheadCount: 0,
       behindCount: 0,

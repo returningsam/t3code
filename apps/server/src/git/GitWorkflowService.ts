@@ -145,14 +145,13 @@ const NESTED_REPOSITORY_SCAN_CACHE_CAPACITY = 256;
 const NESTED_CHANGE_TOTALS_TTL = Duration.seconds(30);
 const NESTED_CHANGE_TOTALS_WAIT = Duration.seconds(2);
 
-type NestedChangeTotals = { readonly insertions: number; readonly deletions: number } | null;
-
 interface NestedRepositories {
-  /** Null until a read finishes, or when one repository has too much to count. */
-  readonly changes: NestedChangeTotals;
+  /** Null until a read finishes. */
+  readonly changes: GitVcsDriver.NestedChangeTotals | null;
 }
 
 function nonRepositoryLocalStatus(nested: NestedRepositories | null): VcsStatusLocalResult {
+  const totals = nested?.changes?.totals;
   return {
     isRepo: false,
     hasPrimaryRemote: false,
@@ -164,8 +163,9 @@ function nonRepositoryLocalStatus(nested: NestedRepositories | null): VcsStatusL
       insertions: 0,
       deletions: 0,
     },
-    ...(nested?.changes ? { branchChanges: { baseRef: null, ...nested.changes } } : {}),
+    ...(totals ? { branchChanges: { baseRef: null, ...totals } } : {}),
     ...(nested ? { hasNestedRepositories: true } : {}),
+    ...(nested?.changes ? { nestedRepositoryChanges: nested.changes.repositories } : {}),
   };
 }
 
@@ -211,7 +211,7 @@ export const make = Effect.gen(function* () {
   const backgroundScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
     Scope.close(scope, Exit.void),
   );
-  const latestNestedChangeTotals = new Map<string, NestedChangeTotals>();
+  const latestNestedChangeTotals = new Map<string, GitVcsDriver.NestedChangeTotals>();
   const nestedChangeTotalsCache = yield* Cache.makeWith(
     (cwd: string) =>
       Cache.get(nestedRepositoriesCache, cwd).pipe(

@@ -406,6 +406,9 @@ function toLocalStatusPart(status: VcsStatusResult): VcsStatusLocalResult {
     workingTree: status.workingTree,
     ...(status.branchChanges ? { branchChanges: status.branchChanges } : {}),
     ...(status.hasNestedRepositories ? { hasNestedRepositories: true } : {}),
+    ...(status.nestedRepositoryChanges
+      ? { nestedRepositoryChanges: status.nestedRepositoryChanges }
+      : {}),
   };
 }
 

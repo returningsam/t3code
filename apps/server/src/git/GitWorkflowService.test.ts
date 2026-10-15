@@ -36,7 +36,8 @@ function layer(input: {
       Layer.mock(GitVcsDriver.GitVcsDriver)({
         findNestedRepositories: () => Effect.succeed(input.nestedRepositories ?? []),
         readNestedChangeTotals:
-          input.readNestedChangeTotals ?? (() => Effect.succeed({ insertions: 0, deletions: 0 })),
+          input.readNestedChangeTotals ??
+          (() => Effect.succeed({ totals: { insertions: 0, deletions: 0 }, repositories: [] })),
       }),
     ),
     Layer.provide(
@@ -48,6 +49,12 @@ function layer(input: {
   );
 }
 
+// A folder whose only changed repository is `main`.
+const mainChanges = (insertions: number, deletions: number) => ({
+  totals: { insertions, deletions },
+  repositories: [{ path: "main", totals: { insertions, deletions } }],
+});
+
 // Each read of the nested totals reports its call number, and totals that count the calls.
 const countedNestedChangeTotals = Effect.gen(function* () {
   const calls = yield* Queue.unbounded<number>();
@@ -55,7 +62,7 @@ const countedNestedChangeTotals = Effect.gen(function* () {
   const read: GitVcsDriver.GitVcsDriver["Service"]["readNestedChangeTotals"] = () =>
     Effect.sync(() => ++count).pipe(
       Effect.tap((call) => Queue.offer(calls, call)),
-      Effect.map((call) => ({ insertions: call, deletions: 0 })),
+      Effect.map((call) => mainChanges(call, 0)),
     );
   return { calls, read };
 });
@@ -168,7 +175,7 @@ describe("GitWorkflowService", () => {
 
   it.effect("reuses the totals of nested repositories' edits across status reads", () => {
     const readNestedChangeTotals = vi.fn((cwd: string, repositories: ReadonlyArray<string>) =>
-      Effect.succeed({ insertions: cwd.length, deletions: repositories.length }),
+      Effect.succeed(mainChanges(cwd.length, repositories.length)),
     );
     return Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;
@@ -190,6 +197,57 @@ describe("GitWorkflowService", () => {
     );
   });
 
+  it.effect("reports every changed nested repository in order beside the read ones' sum", () => {
+    const repositories = [
+      { path: "worktrees/wt-a", totals: { insertions: 3, deletions: 1 } },
+      { path: "main", totals: { insertions: 2, deletions: 0 } },
+      { path: "worktrees/wt-past-the-limit", totals: null },
+    ];
+    const readNestedChangeTotals = vi.fn(() =>
+      Effect.succeed({ totals: { insertions: 5, deletions: 1 }, repositories }),
+    );
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const local = yield* workflow.localStatus({ cwd: "/checkouts" });
+      const full = yield* workflow.status({ cwd: "/checkouts" });
+
+      assert.deepStrictEqual(local.nestedRepositoryChanges, repositories);
+      assert.deepStrictEqual(full.nestedRepositoryChanges, repositories);
+      assert.deepStrictEqual(local.branchChanges, { baseRef: null, insertions: 5, deletions: 1 });
+      assert.equal(readNestedChangeTotals.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+          nestedRepositories: ["main", "worktrees/wt-a"],
+          readNestedChangeTotals,
+        }),
+      ),
+    );
+  });
+
+  it.effect("keeps a nested repository too large to count but leaves out the sum", () => {
+    const repositories = [
+      { path: "main", totals: null },
+      { path: "worktrees/wt-a", totals: { insertions: 3, deletions: 1 } },
+    ];
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const local = yield* workflow.localStatus({ cwd: "/checkouts" });
+
+      assert.deepStrictEqual(local.nestedRepositoryChanges, repositories);
+      assert.isUndefined(local.branchChanges);
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+          nestedRepositories: ["main", "worktrees/wt-a"],
+          readNestedChangeTotals: () => Effect.succeed({ totals: null, repositories }),
+        }),
+      ),
+    );
+  });
+
   it.effect("reads nested totals again after a status refresh invalidates them", () =>
     Effect.gen(function* () {
       const totals = yield* countedNestedChangeTotals;
@@ -205,6 +263,9 @@ describe("GitWorkflowService", () => {
           insertions: 2,
           deletions: 0,
         });
+        assert.deepStrictEqual(second.nestedRepositoryChanges, [
+          { path: "main", totals: { insertions: 2, deletions: 0 } },
+        ]);
         assert.deepStrictEqual(
           [yield* Queue.take(totals.calls), yield* Queue.take(totals.calls)],
           [1, 2],
@@ -228,8 +289,8 @@ describe("GitWorkflowService", () => {
       const readNestedChangeTotals = vi.fn(() => {
         calls += 1;
         return calls === 1
-          ? Effect.succeed({ insertions: 1, deletions: 0 })
-          : Deferred.await(gate).pipe(Effect.as({ insertions: 2, deletions: 0 }));
+          ? Effect.succeed(mainChanges(1, 0))
+          : Deferred.await(gate).pipe(Effect.as(mainChanges(2, 0)));
       });
       yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
@@ -240,6 +301,7 @@ describe("GitWorkflowService", () => {
         const second = yield* Fiber.join(slow);
 
         assert.deepStrictEqual(second.branchChanges, first.branchChanges);
+        assert.deepStrictEqual(second.nestedRepositoryChanges, first.nestedRepositoryChanges);
       }).pipe(
         Effect.provide(
           layer({
@@ -281,7 +343,7 @@ describe("GitWorkflowService", () => {
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>();
       const readNestedChangeTotals = vi.fn(() =>
-        Deferred.await(gate).pipe(Effect.as({ insertions: 3, deletions: 1 })),
+        Deferred.await(gate).pipe(Effect.as(mainChanges(3, 1))),
       );
       yield* Effect.gen(function* () {
         const workflow = yield* GitWorkflowService.GitWorkflowService;
@@ -294,6 +356,7 @@ describe("GitWorkflowService", () => {
 
         assert.isTrue(first.hasNestedRepositories);
         assert.isUndefined(first.branchChanges);
+        assert.isUndefined(first.nestedRepositoryChanges);
         assert.deepStrictEqual(second.branchChanges, {
           baseRef: null,
           insertions: 3,

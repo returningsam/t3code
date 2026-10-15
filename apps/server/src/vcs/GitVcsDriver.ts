@@ -26,6 +26,7 @@ import {
   type VcsInitInput,
   type VcsListRefsInput,
   type VcsListRefsResult,
+  type VcsNestedRepositoryChanges,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
@@ -88,6 +89,11 @@ export interface GitLocalStatusOptions {
   readonly includeDivergence?: boolean;
   /** Also read the diff panel's Changes totals. Failures leave them out. */
   readonly includeBranchChanges?: boolean;
+}
+
+export interface NestedChangeTotals {
+  readonly totals: { readonly insertions: number; readonly deletions: number } | null;
+  readonly repositories: ReadonlyArray<VcsNestedRepositoryChanges>;
 }
 
 export interface GitRemoteStatusDetails {
@@ -348,13 +354,15 @@ export class GitVcsDriver extends Context.Service<
      */
     readonly findNestedRepositories: (cwd: string) => Effect.Effect<ReadonlyArray<string>>;
     /**
-     * Totals of the uncommitted edits, untracked files included, of the `repositories` below
-     * `cwd` that its review diff shows. Null when one has too many untracked files to count.
+     * The `repositories` below `cwd` with uncommitted edits or untracked files, the most
+     * recently changed first, and the summed totals of the ones its review diff reads. A
+     * repository's totals are null past the review's limit, and they and the sum are null when it
+     * has too many untracked files to count.
      */
     readonly readNestedChangeTotals: (
       cwd: string,
       repositories: ReadonlyArray<string>,
-    ) => Effect.Effect<{ readonly insertions: number; readonly deletions: number } | null>;
+    ) => Effect.Effect<NestedChangeTotals>;
     readonly readConfigValue: (
       cwd: string,
       key: string,

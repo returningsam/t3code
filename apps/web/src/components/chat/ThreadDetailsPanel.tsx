@@ -54,7 +54,7 @@ export interface ThreadDetailsPanelProps extends Pick<
   onStartFromOriginChange: (startFromOrigin: boolean) => void;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest: () => void;
-  onOpenChanges?: () => void;
+  onOpenChanges?: (repository?: string) => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (

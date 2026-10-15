@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { resolveStorage } from "./lib/storage";
+import { reconcileNestedRepositorySelection } from "./nestedRepositories.logic";
 
 export type DiffPanelSelection =
   | { kind: "branch"; baseRef: string | null }
@@ -12,11 +13,21 @@ export type DiffPanelSelection =
 
 // "branch" is the Changes view: everything this checkout changed since its base.
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "branch", baseRef: null };
+const ALL_NESTED_REPOSITORIES: ReadonlyArray<string> = [];
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
+  /**
+   * For a folder of repositories, the ones its Changes view shows. Absent shows them all. Not
+   * persisted: every generic opening of Changes shows them all again.
+   */
+  nestedRepositoriesByThreadKey: Record<string, ReadonlyArray<string>>;
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
+  /** Shows only these nested repositories in the Changes view, or all of them when empty. */
+  selectNestedRepositories: (ref: ScopedThreadRef, repositories: ReadonlyArray<string>) => void;
+  /** Unpicks nested repositories that no longer have changes. */
+  reconcileNestedRepositories: (ref: ScopedThreadRef, available: ReadonlyArray<string>) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: RunId, filePath?: string) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<RunId>) => void;
@@ -28,11 +39,21 @@ function normalizeBaseRef(baseRef: string | null): string | null {
   return normalized ? normalized : null;
 }
 
+function withNestedRepositories(
+  byThreadKey: Record<string, ReadonlyArray<string>>,
+  threadKey: string,
+  repositories: ReadonlyArray<string>,
+): Record<string, ReadonlyArray<string>> {
+  const { [threadKey]: _previous, ...rest } = byThreadKey;
+  return repositories.length === 0 ? rest : { ...rest, [threadKey]: [...repositories] };
+}
+
 export const useDiffPanelStore = create<DiffPanelStoreState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      nestedRepositoriesByThreadKey: {},
       selectGitScope: (ref, scope) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -70,6 +91,38 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             },
           };
         }),
+      // Both skip `set` when nothing changes, since every `set` rewrites the persisted state.
+      selectNestedRepositories: (ref, repositories) => {
+        const threadKey = scopedThreadKey(ref);
+        const previous = get().nestedRepositoriesByThreadKey[threadKey] ?? [];
+        if (
+          previous.length === repositories.length &&
+          previous.every((path, index) => repositories[index] === path)
+        ) {
+          return;
+        }
+        set((state) => ({
+          nestedRepositoriesByThreadKey: withNestedRepositories(
+            state.nestedRepositoriesByThreadKey,
+            threadKey,
+            repositories,
+          ),
+        }));
+      },
+      reconcileNestedRepositories: (ref, available) => {
+        const threadKey = scopedThreadKey(ref);
+        const previous = get().nestedRepositoriesByThreadKey[threadKey];
+        if (!previous) return;
+        const next = reconcileNestedRepositorySelection(previous, available);
+        if (next.length === previous.length) return;
+        set((state) => ({
+          nestedRepositoriesByThreadKey: withNestedRepositories(
+            state.nestedRepositoriesByThreadKey,
+            threadKey,
+            next,
+          ),
+        }));
+      },
       selectTurn: (ref, turnId, filePath) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -108,13 +161,25 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       removeThread: (ref) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
-          if (!(threadKey in state.byThreadKey) && !(threadKey in state.branchBaseRefByThreadKey)) {
+          if (
+            !(threadKey in state.byThreadKey) &&
+            !(threadKey in state.branchBaseRefByThreadKey) &&
+            !(threadKey in state.nestedRepositoriesByThreadKey)
+          ) {
             return state;
           }
           const { [threadKey]: _removed, ...byThreadKey } = state.byThreadKey;
           const { [threadKey]: _removedBaseRef, ...branchBaseRefByThreadKey } =
             state.branchBaseRefByThreadKey;
-          return { byThreadKey, branchBaseRefByThreadKey };
+          return {
+            byThreadKey,
+            branchBaseRefByThreadKey,
+            nestedRepositoriesByThreadKey: withNestedRepositories(
+              state.nestedRepositoriesByThreadKey,
+              threadKey,
+              [],
+            ),
+          };
         }),
     }),
     {
@@ -137,4 +202,12 @@ export function selectThreadDiffPanelSelection(
 ): DiffPanelSelection {
   if (!ref) return DEFAULT_SELECTION;
   return byThreadKey[scopedThreadKey(ref)] ?? DEFAULT_SELECTION;
+}
+
+export function selectThreadNestedRepositories(
+  byThreadKey: Record<string, ReadonlyArray<string>>,
+  ref: ScopedThreadRef | null | undefined,
+): ReadonlyArray<string> {
+  if (!ref) return ALL_NESTED_REPOSITORIES;
+  return byThreadKey[scopedThreadKey(ref)] ?? ALL_NESTED_REPOSITORIES;
 }

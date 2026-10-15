@@ -31,7 +31,16 @@ import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  selectThreadNestedRepositories,
+  useDiffPanelStore,
+} from "../diffPanelStore";
+import {
+  nestedRepositorySelectionLabel,
+  reconcileNestedRepositorySelection,
+  toggleNestedRepository,
+} from "../nestedRepositories.logic";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useTheme } from "../hooks/useTheme";
 import {
@@ -58,6 +67,7 @@ import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/Ann
 import { DiffFileTree } from "./diffs/DiffFileTree";
 import { diffFileTreeEntries } from "./diffs/diffFileTree.logic";
 import { Button } from "./ui/button";
+import { MiddleTruncate } from "./ui/middle-truncate";
 import { MorphIcon } from "~/components/MorphIcon";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
@@ -72,9 +82,11 @@ import {
 } from "./ui/combobox";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -96,6 +108,7 @@ import { DiffFileStatus } from "./diffs/DiffFileStatus";
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
 const DIFF_FILE_TREE_STORAGE_KEY = "t3code.diffFileTreeOpen";
+const byPath = (left: string, right: string) => left.localeCompare(right);
 const fileEntryCache = new WeakMap<
   FileDiffMetadata,
   { fileDiff: FileDiffMetadata; fileKey: string; fileVersion: number }
@@ -262,6 +275,36 @@ export default function DiffPanel({
   );
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
   const canReviewGitChanges = canReviewChanges(isGitRepo, gitStatusQuery.data);
+  const pickedNestedRepositories = useDiffPanelStore((state) =>
+    selectThreadNestedRepositories(state.nestedRepositoriesByThreadKey, routeThreadRef),
+  );
+  const nestedRepositoryChanges = gitStatusQuery.data?.nestedRepositoryChanges;
+  const nestedRepositoryPaths = useMemo(
+    () => nestedRepositoryChanges?.map((repository) => repository.path),
+    [nestedRepositoryChanges],
+  );
+  // The review covers every repository until status lists the changed ones to pick from.
+  // Sorted, so the order of picks does not make separate review queries.
+  const selectedNestedRepositories = useMemo(
+    () =>
+      nestedRepositoryPaths
+        ? reconcileNestedRepositorySelection(
+            pickedNestedRepositories,
+            nestedRepositoryPaths,
+          ).toSorted(byPath)
+        : [],
+    [nestedRepositoryPaths, pickedNestedRepositories],
+  );
+  // By path, so items stay put while edits reorder the repositories.
+  const nestedRepositoryMenuPaths = useMemo(
+    () => nestedRepositoryPaths?.toSorted(byPath) ?? [],
+    [nestedRepositoryPaths],
+  );
+  const hasPickedNestedRepositories = pickedNestedRepositories.length > 0;
+  useEffect(() => {
+    if (!routeThreadRef || !nestedRepositoryPaths || !hasPickedNestedRepositories) return;
+    useDiffPanelStore.getState().reconcileNestedRepositories(routeThreadRef, nestedRepositoryPaths);
+  }, [hasPickedNestedRepositories, nestedRepositoryPaths, routeThreadRef]);
   const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
     useTurnDiffSummaries(activeThreadProjection);
   const orderedTurnDiffSummaries = useMemo(
@@ -349,6 +392,9 @@ export default function DiffPanel({
             cwd: activeCwd,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ignoreWhitespace: diffIgnoreWhitespace,
+            ...(selectedNestedRepositories.length > 0
+              ? { repositories: selectedNestedRepositories }
+              : {}),
           },
         })
       : null,
@@ -726,6 +772,11 @@ export default function DiffPanel({
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
+  const selectNestedRepositories = (repositories: ReadonlyArray<string>) => {
+    if (!routeThreadRef) return;
+    useDiffPanelStore.getState().selectNestedRepositories(routeThreadRef, repositories);
+  };
+  const nestedRepositoriesLabel = nestedRepositorySelectionLabel(selectedNestedRepositories);
   // The scope menu has two radio groups: the top-level one treats the latest
   // turn as "latest", while the turn sub-menu keys every turn by id so the
   // latest turn is also marked there.
@@ -800,6 +851,44 @@ export default function DiffPanel({
             </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
+        {selectedRunId === null && nestedRepositoryMenuPaths.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button size="xs" variant="ghost-muted" />}
+              className="min-w-0 max-w-48"
+              aria-label={`Repositories: ${nestedRepositoriesLabel}`}
+            >
+              <MiddleTruncate value={nestedRepositoriesLabel} />
+              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuCheckboxItem
+                checked={selectedNestedRepositories.length === 0}
+                onCheckedChange={() => selectNestedRepositories([])}
+              >
+                All repositories
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              {nestedRepositoryMenuPaths.map((path) => (
+                <DropdownMenuCheckboxItem
+                  key={path}
+                  checked={selectedNestedRepositories.includes(path)}
+                  onCheckedChange={() =>
+                    selectNestedRepositories(
+                      toggleNestedRepository(
+                        selectedNestedRepositories,
+                        nestedRepositoryMenuPaths,
+                        path,
+                      ),
+                    )
+                  }
+                >
+                  <span className="block truncate">{path}</span>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {selectedRunId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
           <div
             className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
