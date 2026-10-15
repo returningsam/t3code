@@ -20,13 +20,17 @@ export function soleNestedRepository(
   return changes?.length === 1 ? changes[0]! : null;
 }
 
-/** The picked repositories that still have changes. Empty means every repository. */
+/**
+ * The picked repositories that still have changes. Empty means every repository, including when
+ * the remaining picks cover all of them.
+ */
 export function reconcileNestedRepositorySelection(
   selected: ReadonlyArray<string>,
   available: ReadonlyArray<string>,
 ): string[] {
   const changed = new Set(available);
-  return selected.filter((path) => changed.has(path));
+  const next = selected.filter((path) => changed.has(path));
+  return available.every((path) => next.includes(path)) ? [] : next;
 }
 
 /**

@@ -58,6 +58,10 @@ describe("reconcileNestedRepositorySelection", () => {
   it("falls back to every repository when none of the picked ones remain", () => {
     expect(reconcileNestedRepositorySelection(["gone"], ["a", "b"])).toEqual([]);
   });
+
+  it("shows every repository when the remaining picks cover all of them", () => {
+    expect(reconcileNestedRepositorySelection(["a", "b"], ["a", "b"])).toEqual([]);
+  });
 });
 
 describe("toggleNestedRepository", () => {
