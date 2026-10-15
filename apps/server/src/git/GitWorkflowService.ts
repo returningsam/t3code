@@ -1,4 +1,6 @@
+import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -127,7 +129,14 @@ export class GitWorkflowService extends Context.Service<
   }
 >()("t3/git/GitWorkflowService") {}
 
-function nonRepositoryLocalStatus(): VcsStatusLocalResult {
+// Status refreshes on focus, git actions, and turn ends, so a folder's scan for nested
+// repositories is reused for a while. A folder too slow to scan, such as a dead network mount,
+// reads as having none.
+const NESTED_REPOSITORY_SCAN_TTL = Duration.seconds(30);
+const NESTED_REPOSITORY_SCAN_TIMEOUT = Duration.millis(1500);
+const NESTED_REPOSITORY_SCAN_CACHE_CAPACITY = 256;
+
+function nonRepositoryLocalStatus(hasNestedRepositories: boolean): VcsStatusLocalResult {
   return {
     isRepo: false,
     hasPrimaryRemote: false,
@@ -139,12 +148,13 @@ function nonRepositoryLocalStatus(): VcsStatusLocalResult {
       insertions: 0,
       deletions: 0,
     },
+    ...(hasNestedRepositories ? { hasNestedRepositories } : {}),
   };
 }
 
-function nonRepositoryStatus(): VcsStatusResult {
+function nonRepositoryStatus(hasNestedRepositories: boolean): VcsStatusResult {
   return {
-    ...nonRepositoryLocalStatus(),
+    ...nonRepositoryLocalStatus(hasNestedRepositories),
     hasUpstream: false,
     aheadCount: 0,
     behindCount: 0,
@@ -168,6 +178,21 @@ export const make = Effect.gen(function* () {
   const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
+  const nestedRepositoriesCache = yield* Cache.makeWith(
+    (cwd: string) =>
+      git.findNestedRepositories(cwd).pipe(
+        Effect.timeoutOrElse({
+          duration: NESTED_REPOSITORY_SCAN_TIMEOUT,
+          orElse: () => Effect.succeed([]),
+        }),
+        Effect.map((repositories) => repositories.length > 0),
+      ),
+    {
+      capacity: NESTED_REPOSITORY_SCAN_CACHE_CAPACITY,
+      timeToLive: () => NESTED_REPOSITORY_SCAN_TTL,
+    },
+  );
+  const hasNestedRepositories = (cwd: string) => Cache.get(nestedRepositoriesCache, cwd);
 
   const ensureGit = Effect.fn("GitWorkflowService.ensureGit")(function* (
     operation: string,
@@ -347,7 +372,9 @@ export const make = Effect.gen(function* () {
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>
-          isGitRepository ? gitManager.status(input) : Effect.succeed(nonRepositoryStatus()),
+          isGitRepository
+            ? gitManager.status(input)
+            : hasNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryStatus)),
         ),
       ),
     localStatus: (input) =>
@@ -355,7 +382,7 @@ export const make = Effect.gen(function* () {
         Effect.flatMap((isGitRepository) =>
           isGitRepository
             ? gitManager.localStatus(input)
-            : Effect.succeed(nonRepositoryLocalStatus()),
+            : hasNestedRepositories(input.cwd).pipe(Effect.map(nonRepositoryLocalStatus)),
         ),
       ),
     remoteStatus: (input, options) =>

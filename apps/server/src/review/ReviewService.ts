@@ -1,5 +1,4 @@
 import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -129,11 +128,7 @@ export const make = Effect.gen(function* () {
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
     if (!handle) {
-      return {
-        cwd: input.cwd,
-        generatedAt: yield* DateTime.now,
-        sources: [],
-      };
+      return yield* git.getReviewDiffPreview(input);
     }
 
     const getDriverDiffPreview = handle.driver.getDiffPreview;
@@ -157,10 +152,10 @@ export const make = Effect.gen(function* () {
     yield* assertWorkspaceBoundCwd("ReviewService.getDiffFileContents", input.cwd);
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
-    if (handle?.kind !== "git") {
+    if (handle !== null && handle.kind !== "git") {
       return yield* new VcsUnsupportedOperationError({
         operation: "ReviewService.getDiffFileContents",
-        kind: handle?.kind ?? "unknown",
+        kind: handle.kind,
         detail: "Unchanged diff expansion currently requires a Git repository.",
       });
     }

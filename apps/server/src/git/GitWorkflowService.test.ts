@@ -18,6 +18,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 function layer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
+  readonly nestedRepositories?: ReadonlyArray<string>;
 }) {
   return GitWorkflowService.layer.pipe(
     Layer.provide(
@@ -25,7 +26,11 @@ function layer(input: {
         detect: input.detect,
       }),
     ),
-    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+    Layer.provide(
+      Layer.mock(GitVcsDriver.GitVcsDriver)({
+        findNestedRepositories: () => Effect.succeed(input.nestedRepositories ?? []),
+      }),
+    ),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
   );
 }
@@ -117,6 +122,25 @@ describe("GitWorkflowService", () => {
     ),
   );
 
+  it.effect("reports nested repositories below a folder that is not a repository", () =>
+    Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const local = yield* workflow.localStatus({ cwd: "/checkouts" });
+      const full = yield* workflow.status({ cwd: "/checkouts" });
+
+      assert.isFalse(local.isRepo);
+      assert.isTrue(local.hasNestedRepositories);
+      assert.isTrue(full.hasNestedRepositories);
+    }).pipe(
+      Effect.provide(
+        layer({
+          detect: () => Effect.succeed(null),
+          nestedRepositories: ["main", "worktrees/wt-a"],
+        }),
+      ),
+    ),
+  );
+
   it.effect("does not call GitManager status methods when no VCS repository is detected", () => {
     const localStatus = vi.fn();
     const remoteStatus = vi.fn();
@@ -128,7 +152,11 @@ describe("GitWorkflowService", () => {
           detect: () => Effect.succeed(null),
         }),
       ),
-      Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+      Layer.provide(
+        Layer.mock(GitVcsDriver.GitVcsDriver)({
+          findNestedRepositories: () => Effect.succeed([]),
+        }),
+      ),
       Layer.provide(
         Layer.mock(GitManager.GitManager)({
           localStatus,

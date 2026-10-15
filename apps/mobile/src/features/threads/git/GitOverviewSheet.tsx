@@ -5,6 +5,7 @@ import {
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
+import { canReviewChanges } from "@t3tools/shared/git";
 import {
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
@@ -109,6 +110,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const gitOperationLabel = gitState.gitOperationLabel;
   const busy = gitOperationLabel !== null;
   const isRepo = gitStatus.data?.isRepo ?? true;
+  const canReview = canReviewChanges(isRepo, gitStatus.data);
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
 
@@ -325,7 +327,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
           icon="text.bubble"
           title="Review changes"
           subtitle="Inspect changes, uncommitted edits, and turn diffs"
-          disabled={busy || !isRepo}
+          disabled={busy || !canReview}
           onPress={() => {
             const params = { environmentId, threadId };
             navigation.dispatch(

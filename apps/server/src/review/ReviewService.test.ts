@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -17,6 +18,7 @@ function layer(input: {
   readonly workspaceRoot: string;
   readonly baseDir: string;
   readonly detectCalls?: Array<{ readonly cwd: string }>;
+  readonly gitPreviewCalls?: Array<{ readonly cwd: string }>;
   readonly worktreesDirectory?: string;
   readonly previousWorktreesDirectories?: ReadonlyArray<string>;
   readonly projectRoots?: ReadonlyArray<string> | "unavailable";
@@ -54,7 +56,15 @@ function layer(input: {
           }),
       }),
     ),
-    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+    Layer.provide(
+      Layer.mock(GitVcsDriver.GitVcsDriver)({
+        getReviewDiffPreview: (request) =>
+          Effect.sync(() => input.gitPreviewCalls?.push({ cwd: request.cwd })).pipe(
+            Effect.andThen(DateTime.now),
+            Effect.map((generatedAt) => ({ cwd: request.cwd, generatedAt, sources: [] })),
+          ),
+      }),
+    ),
     Layer.provide(
       ServerSettings.ServerSettingsService.layerTest({
         worktreesDirectory: input.worktreesDirectory ?? "",
@@ -196,15 +206,16 @@ describe("ReviewService", () => {
       const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
       const detectCalls: Array<{ readonly cwd: string }> = [];
+      const gitPreviewCalls: Array<{ readonly cwd: string }> = [];
 
       const result = yield* Effect.gen(function* () {
         const review = yield* ReviewService.ReviewService;
         return yield* review.getDiffPreview({ cwd: workspaceRoot });
-      }).pipe(Effect.provide(layer({ workspaceRoot, baseDir, detectCalls })));
+      }).pipe(Effect.provide(layer({ workspaceRoot, baseDir, detectCalls, gitPreviewCalls })));
 
       assert.strictEqual(result.cwd, workspaceRoot);
-      assert.deepStrictEqual(result.sources, []);
       assert.deepStrictEqual(detectCalls, [{ cwd: workspaceRoot }]);
+      assert.deepStrictEqual(gitPreviewCalls, [{ cwd: workspaceRoot }]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

@@ -10,6 +10,15 @@ rebases, the files Git brought in are left out. A file stays in the list when th
 committed it, or fixed a conflict in it. Use the branch comparison to review everything that changed
 against your base branch. Restore still returns the complete saved workspace.
 
+## Review nested repositories
+
+When a project holds other git repositories, such as submodules or checkouts copied into it, the
+diff panel's **Changes** and **Uncommitted** views list the files changed inside them under each
+repository's folder. A submodule whose checked-out commit moved shows everything since the commit
+the project records for it. A project folder that is not a git repository itself, such as one
+holding a main checkout and its worktrees, lists the uncommitted edits of each repository one or
+two folders below it. Turn diffs still need the project folder to be a git repository.
+
 ## Connect an account
 
 Install Git and configure authentication on the machine running your T3 Code server. For a remote

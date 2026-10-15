@@ -342,6 +342,11 @@ export class GitVcsDriver extends Context.Service<
     readonly getReviewDiffFileContents: (
       input: ReviewDiffFileContentsInput,
     ) => Effect.Effect<ReviewDiffFileContentsResult, GitCommandError>;
+    /**
+     * Folders one or two levels below `cwd` that hold a `.git` folder or file, relative to
+     * `cwd` with `/` separators. The review diff of a non-repository folder lists their edits.
+     */
+    readonly findNestedRepositories: (cwd: string) => Effect.Effect<ReadonlyArray<string>>;
     readonly readConfigValue: (
       cwd: string,
       key: string,
