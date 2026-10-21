@@ -116,7 +116,8 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  return { archiveVersion: environment.appVersion };
+  // Fork builds have no CLI release of their own, so remotes run upstream's matching release.
+  return { archiveVersion: environment.appVersion.replace(/-fork\.\d+$/, "") };
 };
 
 const layerDesktopSshEnvironment = Layer.unwrap(

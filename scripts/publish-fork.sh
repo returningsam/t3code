@@ -13,7 +13,7 @@ asset=T3-Code-arm64.zip
 cd "$(git rev-parse --show-toplevel)"
 
 # Squirrel.Mac only installs an update signed with the running app's certificate.
-if [[ $(security find-identity -v -p codesigning) != *\"$identity\"* ]]; then
+if [[ $(security find-identity -v -p codesigning) != *"${(U)leaf} \"$identity\""* ]]; then
   print -u2 "publish-fork: \"$identity\" is not a valid signing identity, so trust it with: security find-certificate -c \"$identity\" -p > /tmp/t3-fork.pem && security add-trusted-cert -p codeSign /tmp/t3-fork.pem"
   exit 1
 fi
@@ -34,6 +34,7 @@ if [[ -z "${T3CODE_RELAY_URL:-}" ]] && ! grep -qs '^T3CODE_RELAY_URL=.' .env .en
   exit 1
 fi
 
+git fetch -q upstream --tags
 upstream=$(git tag --merged HEAD -l 'v*' --sort=-v:refname | grep -Em1 '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
 if [[ -z $upstream ]]; then
   print -u2 "publish-fork: no upstream release tag in HEAD's history, so fetch upstream tags first"
@@ -50,11 +51,16 @@ if gh release view $tag --repo $repo > /dev/null 2>&1; then
   print -u2 "publish-fork: $tag is already published"
   exit 1
 fi
+previous=$(gh release view --repo $repo --json tagName -q .tagName 2>/dev/null || true)
+if [[ $previous == *-fork.* && $(print -l $previous $version | sort -V | tail -1) != $version ]]; then
+  print -u2 "publish-fork: $version is not newer than the published $previous"
+  exit 1
+fi
 
 rm -f release/*.yml(N) release/$zip release/$zip.blockmap
 
 # The rustup stable cargo is too old for the resource monitor; Homebrew cargo works.
-PATH="/opt/homebrew/bin:$PATH" T3CODE_DESKTOP_VERSION=$version T3CODE_DESKTOP_UPDATE_REPOSITORY=$repo CSC_NAME=$identity \
+PATH="/opt/homebrew/bin:$PATH" T3CODE_DESKTOP_VERSION=$version T3CODE_DESKTOP_UPDATE_REPOSITORY=$repo CSC_NAME=${(U)leaf} \
   pnpm dist:desktop:dmg:arm64
 
 tmp=$(mktemp -d)
@@ -65,7 +71,7 @@ if [[ ${#app} -ne 1 ]]; then
   print -u2 "publish-fork: $zip does not hold exactly one app"
   exit 1
 fi
-if ! codesign --verify --deep --strict $app[1] || [[ $(codesign -d -r- $app[1] 2>&1) != *"certificate leaf = H\"$leaf\""* ]]; then
+if ! codesign --verify --deep --strict -R="identifier \"com.t3tools.t3code\" and certificate leaf = H\"$leaf\"" $app[1]; then
   print -u2 "publish-fork: the app is not signed by \"$identity\", so installed apps would reject the update"
   exit 1
 fi
