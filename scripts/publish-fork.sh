@@ -7,7 +7,7 @@ set -euo pipefail
 
 repo=returningsam/t3code
 identity="T3 Fork Local"
-leaf=5d4aaf3fd7ba4069c1f08e3a6766f3318da181ff
+leaf=07c5afa82404750fe8b0a164b42f34cb4ef6e8e0
 asset=T3-Code-arm64.zip
 
 cd "$(git rev-parse --show-toplevel)"
