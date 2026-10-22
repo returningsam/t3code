@@ -20,6 +20,7 @@ import {
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
   serverUpdateGuidance,
+  serverUpdateTargetVersion,
   supportsDesktopAppUpdate,
 } from "./versionSkew";
 
@@ -45,6 +46,12 @@ describe("versionSkew", () => {
 
   it("names the upstream release when this client is a fork build", () => {
     expect(manualServerUpdateCommand("0.0.45-fork.1234")).toBe("npx t3@0.0.45");
+  });
+
+  it("keeps the fork version only for servers that update from the desktop app", () => {
+    expect(serverUpdateTargetVersion("desktop-managed", "0.1.0-fork.1234")).toBe("0.1.0-fork.1234");
+    expect(serverUpdateTargetVersion("boot-service", "0.1.0-fork.1234")).toBe("0.1.0");
+    expect(serverUpdateTargetVersion(null, "0.1.0-fork.1234")).toBe("0.1.0");
   });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";

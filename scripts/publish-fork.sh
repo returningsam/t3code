@@ -65,6 +65,9 @@ rm -f release/*.yml(N) release/$zip release/$zip.blockmap
 manifests=(apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json)
 tmp=$(mktemp -d)
 trap "rm -rf $tmp; git checkout -q -- $manifests" EXIT
+# zsh skips the EXIT trap when a signal kills the shell, so exit explicitly.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 node scripts/update-release-package-versions.ts $version
 
 # The rustup stable cargo is too old for the resource monitor; Homebrew cargo works.

@@ -1,10 +1,11 @@
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
-import { cliReleaseChannelOf, cliReleaseVersionOf } from "@t3tools/shared/cliRelease";
+import { cliReleaseChannelOf } from "@t3tools/shared/cliRelease";
 
 import {
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
+  serverUpdateTargetVersion,
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
@@ -137,8 +138,7 @@ export function collectServerUpdateTargets(
       desktopAppUpdate,
       threadContinuation: supportsServerUpdateThreadContinuation(config),
       continueThreadsAfterServerUpdate: config.settings.continueThreadsAfterServerUpdate ?? false,
-      targetVersion:
-        selfUpdate === "desktop-managed" ? targetVersion : cliReleaseVersionOf(targetVersion),
+      targetVersion: serverUpdateTargetVersion(selfUpdate, targetVersion),
     });
   }
   return { targets, skipped };

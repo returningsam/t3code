@@ -108,6 +108,15 @@ export function resolveServerSelfUpdateCapability(
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
 }
 
+/** The version a server update installs. A desktop-managed server installs
+    from its app's update feed; others download the upstream t3 release. */
+export function serverUpdateTargetVersion(
+  selfUpdate: ServerSelfUpdateCapability | null,
+  version: string,
+): string {
+  return selfUpdate === "desktop-managed" ? version : cliReleaseVersionOf(version);
+}
+
 /** True when the desktop app supervising this server can be told to update
     itself over RPC. Older desktop servers only get the manual instruction. */
 export function supportsDesktopAppUpdate(

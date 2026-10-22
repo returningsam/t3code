@@ -26,7 +26,7 @@ import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { serverEnvironment, updateOutdatedServer } from "~/state/server";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { manualServerUpdateCommand } from "~/versionSkew";
+import { manualServerUpdateCommand, serverUpdateTargetVersion } from "~/versionSkew";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -91,9 +91,7 @@ export function useServerUpdate() {
       const result = await updateServer({
         environmentId,
         input: {
-          // A desktop-managed server installs from its app's update feed; others download t3.
-          targetVersion:
-            selfUpdate === "desktop-managed" ? targetVersion : cliReleaseVersionOf(targetVersion),
+          targetVersion: serverUpdateTargetVersion(selfUpdate, targetVersion),
           ...(target.threadContinuation && target.continueThreadsAfterServerUpdate
             ? { continueRunningThreads: true }
             : {}),

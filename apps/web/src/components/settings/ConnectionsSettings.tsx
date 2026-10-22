@@ -155,6 +155,7 @@ import { useUiStateStore } from "~/uiStateStore";
 import {
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
+  serverUpdateTargetVersion,
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
@@ -1610,7 +1611,10 @@ function SavedBackendListRow({
         : "Switched off"
   }${
     versionMismatch
-      ? `\nUpdate available: ${versionMismatch.serverVersion} → ${versionMismatch.clientVersion}`
+      ? `\nUpdate available: ${versionMismatch.serverVersion} → ${serverUpdateTargetVersion(
+          resolveServerSelfUpdateCapability(environment.serverConfig),
+          versionMismatch.clientVersion,
+        )}`
       : ""
   }`;
 

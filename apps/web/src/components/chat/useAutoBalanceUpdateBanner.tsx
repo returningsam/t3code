@@ -13,6 +13,7 @@ import {
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
+  serverUpdateTargetVersion,
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
@@ -69,7 +70,10 @@ export function useAutoBalanceUpdateBanner(
         threadContinuation: supportsServerUpdateThreadContinuation(environment.serverConfig),
         continueThreadsAfterServerUpdate:
           environment.serverConfig?.settings.continueThreadsAfterServerUpdate ?? false,
-        targetVersion: state.status === "idle" ? mismatch!.clientVersion : state.targetVersion,
+        targetVersion:
+          state.status === "idle"
+            ? serverUpdateTargetVersion(selfUpdate, mismatch!.clientVersion)
+            : state.targetVersion,
         connected: environment.connection.phase === "connected",
         remoteUpdate: selfUpdate !== null && (selfUpdate !== "desktop-managed" || desktopAppUpdate),
         state,
