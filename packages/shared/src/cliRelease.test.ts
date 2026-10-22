@@ -7,6 +7,7 @@ import {
   cliReleaseDownloadBaseUrl,
   cliReleaseChannelOf,
   cliReleaseIndexPageUrl,
+  cliReleaseVersionOf,
   newestCliReleaseVersion,
   parseChecksums,
 } from "./cliRelease.ts";
@@ -68,6 +69,13 @@ describe("cliRelease", () => {
     expect(cliReleaseChannelOf("1.2.3-preview.20260911.4")).toBe("preview");
     // A prerelease that is not one of our trains is not silently a nightly.
     expect(cliReleaseChannelOf("1.2.3-rc.1")).toBe("stable");
+  });
+
+  it("maps fork builds to the upstream release they were built from", () => {
+    expect(cliReleaseVersionOf("0.1.0-fork.1234")).toBe("0.1.0");
+    expect(cliReleaseVersionOf("0.1.0")).toBe("0.1.0");
+    expect(cliReleaseVersionOf("0.1.1-nightly.20261015.3176")).toBe("0.1.1-nightly.20261015.3176");
+    expect(cliReleaseVersionOf("0.1.0-fork.beta")).toBe("0.1.0-fork.beta");
   });
 
   it("picks the newest non-draft release on the requested channel", () => {

@@ -5,6 +5,7 @@ import { cliReleaseChannelOf } from "@t3tools/shared/cliRelease";
 import {
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
+  serverUpdateTargetVersion,
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
 } from "~/versionSkew";
@@ -79,6 +80,8 @@ export interface SkippedMachine {
  * target, and servers this app hosts, which would relaunch the app mid-run
  * and update with the app's own install anyway. A desktop-managed server
  * follows its own app's update feed, so the channel rule does not apply to it.
+ * Every other server downloads t3, so a fork build's target becomes the
+ * upstream release it was built from.
  */
 export function collectServerUpdateTargets(
   machines: ReadonlyArray<UpdateEverythingMachine>,
@@ -135,7 +138,7 @@ export function collectServerUpdateTargets(
       desktopAppUpdate,
       threadContinuation: supportsServerUpdateThreadContinuation(config),
       continueThreadsAfterServerUpdate: config.settings.continueThreadsAfterServerUpdate ?? false,
-      targetVersion,
+      targetVersion: serverUpdateTargetVersion(selfUpdate, targetVersion),
     });
   }
   return { targets, skipped };

@@ -4,6 +4,7 @@ import {
   CLI_RELEASE_CHANNELS,
   cliReleaseIndexPageUrl,
   cliReleaseChannelOf,
+  cliReleaseVersionOf,
   newestCliReleaseVersion,
   type CliReleaseChannel,
 } from "@t3tools/shared/cliRelease";
@@ -339,7 +340,7 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const httpClient = yield* HttpClient.HttpClient;
   const service = yield* BootService.BootService;
 
-  const currentVersion = packageJson.version;
+  const currentVersion = cliReleaseVersionOf(packageJson.version);
   const channel = input.channel ?? cliReleaseChannelOf(currentVersion);
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {
     return yield* new CliUpdateError({

@@ -12,6 +12,7 @@ import type {
   ServerSelfUpdateCapability,
 } from "@t3tools/contracts";
 import type { ServerUpdateStage, ServerUpdateState } from "@t3tools/client-runtime/state/server";
+import { cliReleaseVersionOf } from "@t3tools/shared/cliRelease";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -25,7 +26,7 @@ import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { serverEnvironment, updateOutdatedServer } from "~/state/server";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { manualServerUpdateCommand } from "~/versionSkew";
+import { manualServerUpdateCommand, serverUpdateTargetVersion } from "~/versionSkew";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -90,7 +91,7 @@ export function useServerUpdate() {
       const result = await updateServer({
         environmentId,
         input: {
-          targetVersion,
+          targetVersion: serverUpdateTargetVersion(selfUpdate, targetVersion),
           ...(target.threadContinuation && target.continueThreadsAfterServerUpdate
             ? { continueRunningThreads: true }
             : {}),
@@ -377,7 +378,7 @@ export function OutdatedServerUpdateAction({
     try {
       const result = await update({
         environmentId,
-        input: { targetVersion },
+        input: { targetVersion: cliReleaseVersionOf(targetVersion) },
         ...(fromVersion === undefined ? {} : { fromVersion }),
       });
       if (result._tag === "Failure") {

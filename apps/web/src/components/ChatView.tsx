@@ -613,6 +613,7 @@ import {
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   serverUpdateGuidance,
+  serverUpdateTargetVersion,
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
 } from "../versionSkew";
@@ -3266,7 +3267,11 @@ export default function ChatView(props: ChatViewProps) {
               />
               <TooltipPopup side="top">
                 {versionMismatchServerLabel} {versionMismatch.serverVersion}{" "}
-                <span aria-hidden="true">→</span> {versionMismatch.clientVersion}
+                <span aria-hidden="true">→</span>{" "}
+                {serverUpdateTargetVersion(
+                  versionMismatchSelfUpdate,
+                  versionMismatch.clientVersion,
+                )}
               </TooltipPopup>
             </Tooltip>
           ) : (

@@ -8,6 +8,7 @@ import {
 import {
   cliReleaseChannelOf,
   cliReleaseIndexPageUrl,
+  cliReleaseVersionOf,
   newestCliReleaseVersion,
 } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -54,7 +55,8 @@ const Releases = Schema.Array(
 const decodeReleases = Schema.decodeUnknownSync(Releases);
 
 /** Preserve the host's release channel and never offer a downgrade. */
-export async function findEnvironmentUpdate(currentVersion: string, signal: AbortSignal) {
+export async function findEnvironmentUpdate(serverVersion: string, signal: AbortSignal) {
+  const currentVersion = cliReleaseVersionOf(serverVersion);
   const channel = cliReleaseChannelOf(currentVersion);
   for (let page = 1; ; page++) {
     const response = await fetch(cliReleaseIndexPageUrl(page), { signal });

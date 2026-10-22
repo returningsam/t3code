@@ -86,6 +86,15 @@ export const CLI_RELEASE_CHANNELS: ReadonlyArray<CliReleaseChannel> = [
   "preview",
 ];
 
+/**
+ * The release whose CLI archives a version installs. Fork builds are versioned
+ * `<upstream release>-fork.<N>` and publish no archives, so they use the
+ * upstream release they were built from.
+ */
+export function cliReleaseVersionOf(version: string): string {
+  return version.replace(/-fork\.\d+$/, "");
+}
+
 /** The release train a version was published on, derived from its prerelease tag. */
 export function cliReleaseChannelOf(version: string): CliReleaseChannel {
   const channel = /^[^-+]+-(nightly|preview)\.\d{8}\.\d+$/.exec(version)?.[1];
