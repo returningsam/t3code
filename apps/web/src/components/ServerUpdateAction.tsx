@@ -12,6 +12,7 @@ import type {
   ServerSelfUpdateCapability,
 } from "@t3tools/contracts";
 import type { ServerUpdateStage, ServerUpdateState } from "@t3tools/client-runtime/state/server";
+import { cliReleaseVersionOf } from "@t3tools/shared/cliRelease";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -90,7 +91,9 @@ export function useServerUpdate() {
       const result = await updateServer({
         environmentId,
         input: {
-          targetVersion,
+          // A desktop-managed server installs from its app's update feed; others download t3.
+          targetVersion:
+            selfUpdate === "desktop-managed" ? targetVersion : cliReleaseVersionOf(targetVersion),
           ...(target.threadContinuation && target.continueThreadsAfterServerUpdate
             ? { continueRunningThreads: true }
             : {}),
@@ -377,7 +380,7 @@ export function OutdatedServerUpdateAction({
     try {
       const result = await update({
         environmentId,
-        input: { targetVersion },
+        input: { targetVersion: cliReleaseVersionOf(targetVersion) },
         ...(fromVersion === undefined ? {} : { fromVersion }),
       });
       if (result._tag === "Failure") {

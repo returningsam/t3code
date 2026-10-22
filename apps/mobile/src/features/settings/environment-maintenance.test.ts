@@ -178,6 +178,15 @@ describe("environment release checks", () => {
     expect(await findEnvironmentUpdate("1.3.0", signal)).toBeNull();
   });
 
+  it("compares a fork build with the upstream release it was built from", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => Response.json([{ tag_name: "v1.1.0" }])),
+    );
+    expect(await findEnvironmentUpdate("1.0.0-fork.1234", signal)).toBe("1.1.0");
+    expect(await findEnvironmentUpdate("1.1.0-fork.1234", signal)).toBeNull();
+  });
+
   it("walks release pages to find the host's channel", async () => {
     const fetchMock = vi
       .fn()

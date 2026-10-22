@@ -106,6 +106,23 @@ describe("collectServerUpdateTargets", () => {
       ["manual", "needs a manual update"],
     ]);
   });
+
+  it("moves older fork desktops to the fork build and services to its upstream release", () => {
+    const { targets } = collectServerUpdateTargets(
+      [
+        machine("older-fork-desktop", "0.0.50-fork.100", "desktop-managed"),
+        machine("current-fork-desktop", "0.0.50-fork.120", "desktop-managed"),
+        machine("upstream-service", "0.0.49", "boot-service"),
+        machine("current-service", "0.0.50", "boot-service"),
+      ],
+      "0.0.50-fork.120",
+    );
+
+    expect(targets.map((target) => [target.serverLabel, target.targetVersion])).toEqual([
+      ["older-fork-desktop", "0.0.50-fork.120"],
+      ["upstream-service", "0.0.50"],
+    ]);
+  });
 });
 
 describe("collectRestartingMachines", () => {

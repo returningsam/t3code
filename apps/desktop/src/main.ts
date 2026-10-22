@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 
 import * as Electron from "electron";
 
+import { cliReleaseVersionOf } from "@t3tools/shared/cliRelease";
 import * as NetService from "@t3tools/shared/Net";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
@@ -116,8 +117,7 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  // Fork builds have no CLI release of their own, so remotes run upstream's matching release.
-  return { archiveVersion: environment.appVersion.replace(/-fork\.\d+$/, "") };
+  return { archiveVersion: cliReleaseVersionOf(environment.appVersion) };
 };
 
 const layerDesktopSshEnvironment = Layer.unwrap(

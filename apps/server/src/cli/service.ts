@@ -1,3 +1,4 @@
+import { cliReleaseVersionOf } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
@@ -13,11 +14,14 @@ import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
+/** The t3 release this CLI installs as the service. */
+const releaseVersion = cliReleaseVersionOf(packageJson.version);
+
 export const layer = (config: ServerConfig.ServerConfig["Service"]) =>
   BootService.layer({
     baseDir: config.baseDir,
     logsDir: config.logsDir,
-    cliVersion: packageJson.version,
+    cliVersion: releaseVersion,
   }).pipe(
     Layer.provide(ProcessRunner.layer),
     // Archive-distributed versions download the release archive here.
@@ -48,11 +52,11 @@ export const reconcileService = Effect.fn("cli.service.reconcile")(function* (op
   if (
     status.installedVersion !== undefined &&
     options?.allowDowngrade !== true &&
-    compareExactServiceVersions(packageJson.version, status.installedVersion) < 0
+    compareExactServiceVersions(releaseVersion, status.installedVersion) < 0
   ) {
     return yield* new BootService.BootServiceDowngradeRefusedError({
       installedVersion: status.installedVersion,
-      targetVersion: packageJson.version,
+      targetVersion: releaseVersion,
     });
   }
   const plan = yield* service.install(options);
@@ -126,13 +130,11 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
       Effect.gen(function* () {
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
-          yield* Console.log(
-            `T3 Code service is already installed with t3@${packageJson.version}.`,
-          );
+          yield* Console.log(`T3 Code service is already installed with t3@${releaseVersion}.`);
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${releaseVersion}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -153,11 +155,11 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
         );
         const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
         if (!result.changed) {
-          yield* Console.log(`T3 Code service is already using t3@${packageJson.version}.`);
+          yield* Console.log(`T3 Code service is already using t3@${releaseVersion}.`);
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${releaseVersion}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -208,7 +210,7 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
       flags,
       Effect.gen(function* () {
         const service = yield* BootService.BootService;
-        yield* Console.log(formatServiceStatus(yield* service.status, packageJson.version));
+        yield* Console.log(formatServiceStatus(yield* service.status, releaseVersion));
       }),
     ),
   ),
@@ -231,7 +233,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
   if (
     installed &&
     status.installedVersion !== undefined &&
-    compareExactServiceVersions(status.installedVersion, packageJson.version) > 0
+    compareExactServiceVersions(status.installedVersion, releaseVersion) > 0
   ) {
     yield* Console.log(
       `A newer t3@${status.installedVersion} background service is installed. Leaving it unchanged.`,

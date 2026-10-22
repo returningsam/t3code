@@ -42,6 +42,10 @@ describe("versionSkew", () => {
     expect(manualServerUpdateCommand("0.0.45", { kind: "pnpm-dlx" })).toBe("pnpm dlx t3@0.0.45");
     expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe("bunx t3@0.0.45");
   });
+
+  it("names the upstream release when this client is a fork build", () => {
+    expect(manualServerUpdateCommand("0.0.45-fork.1234")).toBe("npx t3@0.0.45");
+  });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";
   });
@@ -120,6 +124,25 @@ describe("versionSkew", () => {
     branding.APP_VERSION = "0.0.34-nightly.20260824.1125";
 
     expect(resolveVersionMismatch("0.0.34-nightly.20260824.1126")).toBeNull();
+  });
+
+  it("compares two fork builds by their full versions", () => {
+    branding.APP_VERSION = "0.0.34-fork.200";
+
+    expect(resolveVersionMismatch("0.0.34-fork.150")).toEqual({
+      clientVersion: "0.0.34-fork.200",
+      serverVersion: "0.0.34-fork.150",
+      hint: MISMATCH_HINT,
+    });
+    expect(resolveVersionMismatch("0.0.34-fork.200")).toBeNull();
+    expect(resolveVersionMismatch("0.0.34-fork.250")).toBeNull();
+  });
+
+  it("compares a fork build with an upstream build by their core versions", () => {
+    branding.APP_VERSION = "0.0.34-fork.200";
+
+    expect(resolveVersionMismatch("0.0.34")).toBeNull();
+    expect(resolveVersionMismatch("0.0.33")).not.toBeNull();
   });
 
   it("treats a nightly server built past the client as ahead, not skew", () => {
