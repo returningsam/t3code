@@ -109,6 +109,7 @@ import { PullRequestMarkdownRepository } from "./PullRequestMarkdown";
 import {
   PullRequestStatusMenu,
   PullRequestChecksRow,
+  PullRequestDeploymentRows,
   PullRequestBranchRow,
   PullRequestReviewersRow,
 } from "./PullRequestStatusRows";
@@ -248,6 +249,7 @@ function PullRequestOverview(props: {
       <PullRequestStackCard params={props.params} state={props.stack} />
       <PullRequestCardGroup>
         <PullRequestChecksRow pr={pr} params={props.params} />
+        <PullRequestDeploymentRows pr={pr} />
         <PullRequestReviewersRow pr={pr} params={props.params} />
         <Animated.View layout={PR_ROW_LAYOUT}>
           <PullRequestBranchRow pr={pr} params={props.params} />

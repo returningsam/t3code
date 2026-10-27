@@ -1,7 +1,11 @@
 import { usePullRequestConnected } from "./usePullRequestConnected";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
-import type { PullRequestAction, PullRequestDetail } from "@t3tools/contracts";
+import type {
+  PullRequestAction,
+  PullRequestDeployment,
+  PullRequestDetail,
+} from "@t3tools/contracts";
 import Animated from "react-native-reanimated";
 import { PR_ROW_LAYOUT, PR_DISCLOSURE_ENTER, PR_ROW_EXIT } from "./pullRequestAnimations";
 import { useState } from "react";
@@ -43,6 +47,11 @@ const CHECK_PRIORITY = {
   skipped: 5,
   success: 6,
 };
+const DEPLOYMENT_STATUS_LABEL = {
+  pending: "Deploying",
+  success: "Ready",
+  failure: "Failed",
+} as const satisfies Record<PullRequestDeployment["status"], string>;
 
 export function PullRequestStatusMenu(props: RowProps) {
   const action = usePullRequestAction(props.params, props.pr);
@@ -167,6 +176,30 @@ export function PullRequestChecksRow(props: RowProps) {
           />
         </Animated.View>
       ) : null}
+    </Animated.View>
+  );
+}
+
+export function PullRequestDeploymentRows(props: Pick<RowProps, "pr">) {
+  if (!props.pr.deployments?.length) return null;
+  return (
+    <Animated.View layout={PR_ROW_LAYOUT}>
+      {props.pr.deployments.map((deployment) => {
+        const status = checkStatus(deployment);
+        const label = DEPLOYMENT_STATUS_LABEL[deployment.status];
+        return (
+          <PullRequestCardRow
+            key={deployment.environment}
+            title={deployment.environment}
+            icon={status.icon}
+            tint={status.tint}
+            value={label}
+            compact
+            accessibilityLabel={`${deployment.environment} deployment, ${label}`}
+            onPress={() => void Linking.openURL(deployment.url)}
+          />
+        );
+      })}
     </Animated.View>
   );
 }

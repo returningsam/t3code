@@ -11,6 +11,7 @@ import type {
   PullRequestCheck,
   PullRequestChecks,
   PullRequestComment,
+  PullRequestDeployment,
   PullRequestFileViewed,
   PullRequestCommit,
   PullRequestInvolvement,
@@ -236,6 +237,8 @@ export interface ProviderChangeRequestDetail extends ProviderChangeRequest {
   readonly closedAt: string | null;
   readonly reviewers: ReadonlyArray<PullRequestActor>;
   readonly checks: ReadonlyArray<PullRequestCheck>;
+  /** The head commit's deployments, from a host that reports them. */
+  readonly deployments?: ReadonlyArray<PullRequestDeployment>;
   readonly mergeCapabilities: PullRequestMergeCapabilities;
   readonly viewerPermissions: PullRequestViewerPermissions;
   /** Absent from a host that cannot compare the branch with its base, which is most of them. */

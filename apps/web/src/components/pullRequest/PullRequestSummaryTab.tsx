@@ -3,6 +3,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import type {
   EnvironmentId,
   PullRequestComment,
+  PullRequestDeployment,
   PullRequestDetailView,
   PullRequestRef,
   PullRequestReviewThread,
@@ -12,6 +13,7 @@ import {
   ArrowDownUpIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  GlobeIcon,
   HammerIcon,
   ListFilterIcon,
   TagIcon,
@@ -70,6 +72,12 @@ import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
 import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
+
+const DEPLOYMENT_STATUS_LABEL = {
+  pending: "Deploying",
+  success: "Ready",
+  failure: "Failed",
+} as const satisfies Record<PullRequestDeployment["status"], string>;
 
 /** One reviewer, however a host happens to have cased their login this time. */
 function reviewerKey(login: string): string {
@@ -501,6 +509,12 @@ export function PullRequestSummaryTab({
       toastManager.add({ type: "error", title: "Unable to open check details" });
     });
   };
+  const openDeployment = (url: string) => {
+    void openLink(url).catch((error: unknown) => {
+      console.error(error);
+      toastManager.add({ type: "error", title: "Unable to open the preview" });
+    });
+  };
 
   const update = useAtomCommand(pullRequestEnvironment.update, { reportFailure: false });
   const updateComment = useAtomCommand(pullRequestEnvironment.updateComment, {
@@ -768,6 +782,34 @@ export function PullRequestSummaryTab({
                     allowed={detail.viewerPermissions.labels !== false}
                   />
                 ) : null}
+              </span>
+            </MetaRow>
+          ) : null}
+          {detail.deployments !== undefined && detail.deployments.length > 0 ? (
+            <MetaRow icon={<GlobeIcon className="size-3.5" />} label="Preview">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                {detail.deployments.map((deployment) => (
+                  <Tooltip key={deployment.environment}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="flex min-w-0 items-center gap-1.5 hover:underline"
+                          onClick={() => openDeployment(deployment.url)}
+                        />
+                      }
+                    >
+                      <PullRequestCheckStatusIcon status={deployment.status} />
+                      <span className="truncate">{deployment.environment}</span>
+                      <span className="sr-only">
+                        , {DEPLOYMENT_STATUS_LABEL[deployment.status]}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom">
+                      {DEPLOYMENT_STATUS_LABEL[deployment.status]} · {deployment.url}
+                    </TooltipPopup>
+                  </Tooltip>
+                ))}
               </span>
             </MetaRow>
           ) : null}

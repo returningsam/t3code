@@ -202,7 +202,29 @@ export const make = Effect.gen(function* () {
       cause: error,
     });
 
-  const readChecks = (input: ProviderRepositoryRef & { readonly number: number }) =>
+  /**
+   * Preview links are an extra the page can do without, so only a rate limit, which the next
+   * read would hit as well, fails the detail.
+   */
+  const readDeployments = (
+    input: ProviderRepositoryRef,
+    pullRequest: { readonly state: string; readonly headSha?: string | null | undefined },
+  ) =>
+    pullRequest.state !== "open" || pullRequest.headSha == null
+      ? Effect.succeed(undefined)
+      : cli.listCommitDeployments({ ...input, sha: pullRequest.headSha }).pipe(
+          Effect.catchIf(
+            (error) =>
+              error._tag !== "GitHubApiRateLimitError" &&
+              error._tag !== "SourceControlRateLimitPausedError",
+            () => Effect.succeed(undefined),
+          ),
+        );
+
+  const readChecks = (
+    input: ProviderRepositoryRef & { readonly number: number },
+    options?: { readonly deployments: true },
+  ) =>
     cli.getPullRequestDetail(input).pipe(
       Effect.flatMap((pullRequest) =>
         (pullRequest.state !== "open" || pullRequest.isCrossRepository !== true
@@ -237,7 +259,11 @@ export const make = Effect.gen(function* () {
                   }),
                 )
         ).pipe(
-          Effect.map((workflowApprovals) => ({
+          Effect.zip(
+            options?.deployments ? readDeployments(input, pullRequest) : Effect.succeed(undefined),
+            { concurrent: true },
+          ),
+          Effect.map(([workflowApprovals, deployments]) => ({
             ...pullRequest,
             author: withAvatar(pullRequest.author, new Map(), input.host),
             checks: withWorkflowApprovals(
@@ -248,6 +274,7 @@ export const make = Effect.gen(function* () {
             ...(workflowApprovals.unavailable
               ? {}
               : { workflowApprovalsRequired: workflowApprovals.runs.length }),
+            ...(deployments === undefined ? {} : { deployments }),
           })),
         ),
       ),
@@ -378,7 +405,7 @@ export const make = Effect.gen(function* () {
       ),
 
     getChangeRequest: (input) =>
-      readChecks(input).pipe(
+      readChecks(input, { deployments: true }).pipe(
         Effect.map((pullRequest): ProviderChangeRequestDetail => ({
           ...pullRequest,
           author: withAvatar(pullRequest.author, new Map<string, string>(), input.host),

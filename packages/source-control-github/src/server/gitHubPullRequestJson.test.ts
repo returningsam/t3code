@@ -11,6 +11,7 @@ import {
   decodePullRequestStackMembershipsJson,
   buildReviewerRequest,
   buildSetFilesViewedGraphQlMutation,
+  decodeCommitDeploymentsJson,
   decodePullRequestActivityJson,
   decodePullRequestDetailJson,
   decodePullRequestFilesJson,
@@ -364,6 +365,45 @@ describe("pull request detail decoding", () => {
 
     expect(detail.checks.map((check) => check.status)).toEqual(["success", "action-required"]);
     expect(detail.checksState).toBe("pending");
+  });
+
+  it("keeps the newest linkable deployment per environment", () => {
+    const deployment = (environment: string | null, state: string, environmentUrl?: string) => ({
+      environment,
+      latestStatus: { state, environmentUrl: environmentUrl ?? null },
+    });
+    const decode = (nodes: ReadonlyArray<unknown>) =>
+      expectSuccess(
+        decodeCommitDeploymentsJson(
+          JSON.stringify({ data: { repository: { object: { deployments: { nodes } } } } }),
+        ),
+      );
+
+    expect(
+      decode([
+        deployment("Preview", "INACTIVE", "https://old.vercel.app"),
+        deployment("Preview", "SUCCESS", "https://new.vercel.app"),
+        // A redeploy that has no URL yet leaves the live one in place.
+        deployment("Preview", "IN_PROGRESS"),
+        deployment("Storybook", "QUEUED", "https://storybook.example.com"),
+        deployment("Production", "ERROR", "https://example.com"),
+        deployment("Docs", "INACTIVE", "https://docs.example.com"),
+        deployment("Script", "SUCCESS", "javascript:alert(1)"),
+        deployment(null, "SUCCESS", "https://nameless.example.com"),
+        { environment: "Unstarted", latestStatus: null },
+        null,
+      ]),
+    ).toEqual([
+      { environment: "Preview", url: "https://new.vercel.app", status: "success" },
+      { environment: "Storybook", url: "https://storybook.example.com", status: "pending" },
+      { environment: "Production", url: "https://example.com", status: "failure" },
+    ]);
+    // A SHA GitHub cannot find answers with a null object rather than an error.
+    expect(
+      expectSuccess(
+        decodeCommitDeploymentsJson(JSON.stringify({ data: { repository: { object: null } } })),
+      ),
+    ).toEqual([]);
   });
 
   it("decodes workflow runs that can be approved", () => {

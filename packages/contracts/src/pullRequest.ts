@@ -158,6 +158,14 @@ export const PullRequestCheck = Schema.Struct({
 });
 export type PullRequestCheck = typeof PullRequestCheck.Type;
 
+/** Where the head commit was last deployed in one environment, such as a Vercel preview. */
+export const PullRequestDeployment = Schema.Struct({
+  environment: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  status: Schema.Literals(["pending", "success", "failure"]),
+});
+export type PullRequestDeployment = typeof PullRequestDeployment.Type;
+
 /**
  * The reactions a remark can carry. GitHub's eight, which is also what the picker offers: GitLab
  * accepts any emoji as an award, and the ones outside this set are read as nothing rather than
@@ -901,6 +909,8 @@ export const PullRequestDetail = Schema.Struct({
   reviewers: Schema.Array(PullRequestActor),
   labels: Schema.Array(PullRequestLabel),
   checks: Schema.Array(PullRequestCheck),
+  /** Read while the change request is open. Absent where the host has no such read or it failed. */
+  deployments: Schema.optional(Schema.Array(PullRequestDeployment)),
   mergeCapabilities: PullRequestMergeCapabilities,
   /**
    * Who the host says the reader is, which is the one thing a conversation cannot be read without

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
-import type { PullRequestReaction } from "@t3tools/contracts";
+import type { PullRequestDeployment, PullRequestReaction } from "@t3tools/contracts";
 
 import { decodePullRequestDetailJson } from "./gitHubPullRequestJson.ts";
 import * as GitHubApi from "./GitHubApi.ts";
@@ -523,6 +523,7 @@ describe("gitHubViewerPermissions", () => {
               comments: [],
               commits: [],
             }),
+          listCommitDeployments: () => Effect.succeed([]),
           listWorkflowRunsRequiringApproval: () =>
             Effect.succeed([
               {
@@ -587,6 +588,7 @@ it.effect(
           Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({
             getPullRequestDetail: () =>
               Effect.succeed({ ...openDetail, comparison: { behindBy: 2, viewerCanUpdate: true } }),
+            listCommitDeployments: () => Effect.succeed([]),
             listWorkflowRunsRequiringApproval: () =>
               Effect.succeed([{ id: 123, name: "tests", url: "https://example.com/runs/123" }]),
           }),
@@ -628,6 +630,7 @@ it.effect("does not classify same-repository gates as fork workflow approvals", 
       Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({
         revalidateChecks: (_input, read) => read,
         getPullRequestDetail: () => Effect.succeed({ ...openDetail, isCrossRepository: false }),
+        listCommitDeployments: () => Effect.succeed([]),
         listWorkflowRunsRequiringApproval: () =>
           Effect.die("same-repository pull requests must not probe fork workflow approvals"),
         getViewerAccess: () =>
@@ -667,6 +670,7 @@ it.effect("keeps an unsafe workflow approval scope visible as unknown", () =>
       Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({
         revalidateChecks: (_input, read) => read,
         getPullRequestDetail: () => Effect.succeed(openDetail),
+        listCommitDeployments: () => Effect.succeed([]),
         listWorkflowRunsRequiringApproval: () =>
           Effect.fail(
             new GitHubPullRequestApi.GitHubWorkflowApprovalRefusedError({
@@ -709,6 +713,7 @@ it.effect("propagates workflow discovery rate limits", () =>
       Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({
         revalidateChecks: (_input, read) => read,
         getPullRequestDetail: () => Effect.succeed(openDetail),
+        listCommitDeployments: () => Effect.succeed([]),
         listWorkflowRunsRequiringApproval: () =>
           Effect.fail(
             new GitHubApi.GitHubApiRateLimitError({
@@ -727,6 +732,59 @@ it.effect("propagates workflow discovery rate limits", () =>
       }),
     ),
   ),
+);
+
+it.effect("adds the head's deployments to the detail, and leaves them off when unreadable", () =>
+  Effect.gen(function* () {
+    let deploymentsRead: Effect.Effect<
+      ReadonlyArray<PullRequestDeployment>,
+      GitHubPullRequestApi.GitHubPullRequestApiError
+    > = Effect.succeed([
+      { environment: "Preview", url: "https://web-abc123.vercel.app", status: "success" },
+    ]);
+    const provider = yield* make.pipe(
+      Effect.provide(
+        Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({
+          revalidateChecks: (_input, read) => read,
+          getPullRequestDetail: () => Effect.succeed({ ...openDetail, isCrossRepository: false }),
+          listCommitDeployments: (input) =>
+            input.sha === "abc123" ? deploymentsRead : Effect.die("read the wrong commit"),
+        }),
+      ),
+    );
+    const input = { cwd: "/w", repository: "acme/web", host: "github.com", number: 7 };
+
+    expect((yield* provider.getChangeRequest(input)).deployments).toEqual([
+      { environment: "Preview", url: "https://web-abc123.vercel.app", status: "success" },
+    ]);
+
+    // A fine-grained token without Deployments access gets a GraphQL error for this read alone.
+    deploymentsRead = Effect.fail(
+      new GitHubApi.GitHubApiResponseError({
+        host: "github.com",
+        operation: "listCommitDeployments",
+        status: 200,
+      }),
+    );
+    const detail = yield* provider.getChangeRequest(input);
+    expect(detail.title).toBe("Pull request 7");
+    expect(detail.deployments).toBeUndefined();
+
+    deploymentsRead = Effect.fail(
+      new GitHubApi.GitHubApiRateLimitError({
+        host: "github.com",
+        operation: "listCommitDeployments",
+      }),
+    );
+    const error = yield* provider.getChangeRequest(input).pipe(Effect.flip);
+    expect(error.reason).toBe("rate-limited");
+
+    // The checks refresh keeps only the state and checks, so it does not spend the read.
+    deploymentsRead = Effect.die("checks refresh read deployments");
+    const readChecks = provider.getChangeRequestChecks;
+    if (readChecks === undefined) return yield* Effect.die("checks read missing");
+    expect((yield* readChecks(input)).state).toBe("open");
+  }),
 );
 
 describe("getViewerPermissions", () => {

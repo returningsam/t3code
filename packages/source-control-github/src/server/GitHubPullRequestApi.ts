@@ -24,6 +24,7 @@ import {
   type PullRequestActor,
   type PullRequestComment,
   type PullRequestCommit,
+  type PullRequestDeployment,
   type PullRequestFileViewed,
   type PullRequestInvolvement,
   type PullRequestListFilters,
@@ -70,6 +71,8 @@ import {
   type GitHubPullRequestWatchFingerprint,
   decodePullRequestPreviewJson,
   PULL_REQUEST_PREVIEW_GRAPHQL_QUERY,
+  COMMIT_DEPLOYMENTS_GRAPHQL_QUERY,
+  decodeCommitDeploymentsJson,
   decodePullRequestFilesJson,
   decodePullRequestFilesViewedJson,
   decodePullRequestHeadsJson,
@@ -583,6 +586,14 @@ export class GitHubPullRequestApi extends Context.Service<
       Omit<PullRequestPreview, "projectId" | "repository">,
       GitHubPullRequestApiError
     >;
+
+    /** The newest linkable deployment per environment on one commit. */
+    readonly listCommitDeployments: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly sha: string;
+    }) => Effect.Effect<ReadonlyArray<PullRequestDeployment>, GitHubPullRequestApiError>;
 
     readonly listWorkflowRunsRequiringApproval: (input: {
       readonly cwd: string;
@@ -2203,6 +2214,17 @@ export const make = Effect.gen(function* () {
         variables: { owner, name, number: input.number },
         query: PULL_REQUEST_PREVIEW_GRAPHQL_QUERY,
         decode: decodePullRequestPreviewJson,
+      });
+    },
+    listCommitDeployments: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      return graphqlRead({
+        cwd: input.cwd,
+        host: input.host,
+        operation: "listCommitDeployments",
+        variables: { owner, name, sha: input.sha },
+        query: COMMIT_DEPLOYMENTS_GRAPHQL_QUERY,
+        decode: decodeCommitDeploymentsJson,
       });
     },
     listWorkflowRunsRequiringApproval,
