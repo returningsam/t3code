@@ -203,8 +203,9 @@ export const make = Effect.gen(function* () {
     });
 
   /**
-   * Preview links are an extra the page can do without, so only a rate limit, which the next
-   * read would hit as well, fails the detail.
+   * Preview links are an extra the page can do without, so no failure here fails the detail the
+   * core read already produced, a rate limit included: the host pause it records holds back the
+   * next read either way. It waits on the core read for the head SHA, hence the short timeout.
    */
   const readDeployments = (
     input: ProviderRepositoryRef,
@@ -213,12 +214,11 @@ export const make = Effect.gen(function* () {
     pullRequest.state !== "open" || pullRequest.headSha == null
       ? Effect.succeed(undefined)
       : cli.listCommitDeployments({ ...input, sha: pullRequest.headSha }).pipe(
-          Effect.catchIf(
-            (error) =>
-              error._tag !== "GitHubApiRateLimitError" &&
-              error._tag !== "SourceControlRateLimitPausedError",
-            () => Effect.succeed(undefined),
+          Effect.timeout("5 seconds"),
+          Effect.tapError((cause) =>
+            Effect.logDebug("pull request deployments read failed", { cause }),
           ),
+          Effect.orElseSucceed(() => undefined),
         );
 
   const readChecks = (

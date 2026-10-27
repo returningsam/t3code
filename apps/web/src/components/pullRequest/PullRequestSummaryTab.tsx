@@ -503,16 +503,14 @@ export function PullRequestSummaryTab({
   ];
 
   const openLink = useOpenLink(threadRef);
-  const openCheck = (url: string) => {
-    void openLink(url).catch((error: unknown) => {
+  const openExternal = (
+    url: string,
+    failureTitle: string,
+    event?: { readonly metaKey: boolean; readonly ctrlKey: boolean },
+  ) => {
+    void openLink(url, event ? { event } : undefined).catch((error: unknown) => {
       console.error(error);
-      toastManager.add({ type: "error", title: "Unable to open check details" });
-    });
-  };
-  const openDeployment = (url: string) => {
-    void openLink(url).catch((error: unknown) => {
-      console.error(error);
-      toastManager.add({ type: "error", title: "Unable to open the preview" });
+      toastManager.add({ type: "error", title: failureTitle });
     });
   };
 
@@ -794,12 +792,14 @@ export function PullRequestSummaryTab({
                       render={
                         <button
                           type="button"
-                          className="flex min-w-0 items-center gap-1.5 hover:underline"
-                          onClick={() => openDeployment(deployment.url)}
+                          className="flex min-w-0 cursor-pointer items-center gap-1.5 hover:underline"
+                          onClick={(event) =>
+                            openExternal(deployment.url, "Unable to open the preview", event)
+                          }
                         />
                       }
                     >
-                      <PullRequestCheckStatusIcon status={deployment.status} />
+                      <PullRequestCheckStatusIcon status={deployment.status} still />
                       <span className="truncate">{deployment.environment}</span>
                       <span className="sr-only">
                         , {DEPLOYMENT_STATUS_LABEL[deployment.status]}
@@ -876,7 +876,9 @@ export function PullRequestSummaryTab({
                 <button
                   type="button"
                   disabled={!check.url}
-                  onClick={() => check.url && openCheck(check.url)}
+                  onClick={() =>
+                    check.url && openExternal(check.url, "Unable to open check details")
+                  }
                   className={cn(
                     "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left text-xs leading-5 [&>svg]:mt-0.5",
                     check.url ? "cursor-pointer" : "cursor-default",

@@ -248,14 +248,20 @@ export function pullRequestCheckStatusLabel(
     : CHECK_STATUS_PRESENTATION[check.status].label;
 }
 
-export function PullRequestCheckStatusIcon({ status }: { status: PullRequestCheckStatus }) {
+/**
+ * `still` swaps the pending spinner for a static dot, for rows that stay on screen without a
+ * refresh behind them, where a spinner would keep going after the work finished.
+ */
+export function PullRequestCheckStatusIcon({
+  status,
+  still = false,
+}: {
+  status: PullRequestCheckStatus;
+  still?: boolean;
+}) {
   const presentation = CHECK_STATUS_PRESENTATION[status];
-  return (
-    <presentation.Icon
-      aria-hidden
-      className={cn("size-3.5 shrink-0", presentation.toneClassName)}
-    />
-  );
+  const Icon = still && status === "pending" ? CircleDotIcon : presentation.Icon;
+  return <Icon aria-hidden className={cn("size-3.5 shrink-0", presentation.toneClassName)} />;
 }
 
 /**

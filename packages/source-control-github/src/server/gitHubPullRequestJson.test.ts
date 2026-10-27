@@ -385,6 +385,7 @@ describe("pull request detail decoding", () => {
         deployment("Preview", "SUCCESS", "https://new.vercel.app"),
         // A redeploy that has no URL yet leaves the live one in place.
         deployment("Preview", "IN_PROGRESS"),
+        deployment("Storybook", "SUCCESS", "https://storybook-old.example.com"),
         deployment("Storybook", "QUEUED", "https://storybook.example.com"),
         deployment("Production", "ERROR", "https://example.com"),
         deployment("Docs", "INACTIVE", "https://docs.example.com"),

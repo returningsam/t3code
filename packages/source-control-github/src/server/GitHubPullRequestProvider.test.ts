@@ -736,6 +736,7 @@ it.effect("propagates workflow discovery rate limits", () =>
 
 it.effect("adds the head's deployments to the detail, and leaves them off when unreadable", () =>
   Effect.gen(function* () {
+    let detailState: "open" | "merged" = "open";
     let deploymentsRead: Effect.Effect<
       ReadonlyArray<PullRequestDeployment>,
       GitHubPullRequestApi.GitHubPullRequestApiError
@@ -746,7 +747,8 @@ it.effect("adds the head's deployments to the detail, and leaves them off when u
       Effect.provide(
         Layer.mock(GitHubPullRequestApi.GitHubPullRequestApi)({
           revalidateChecks: (_input, read) => read,
-          getPullRequestDetail: () => Effect.succeed({ ...openDetail, isCrossRepository: false }),
+          getPullRequestDetail: () =>
+            Effect.succeed({ ...openDetail, state: detailState, isCrossRepository: false }),
           listCommitDeployments: (input) =>
             input.sha === "abc123" ? deploymentsRead : Effect.die("read the wrong commit"),
         }),
@@ -776,8 +778,13 @@ it.effect("adds the head's deployments to the detail, and leaves them off when u
         operation: "listCommitDeployments",
       }),
     );
-    const error = yield* provider.getChangeRequest(input).pipe(Effect.flip);
-    expect(error.reason).toBe("rate-limited");
+    expect((yield* provider.getChangeRequest(input)).deployments).toBeUndefined();
+
+    // A merged pull request has no live preview to read.
+    deploymentsRead = Effect.die("merged pull request read deployments");
+    detailState = "merged";
+    expect((yield* provider.getChangeRequest(input)).deployments).toBeUndefined();
+    detailState = "open";
 
     // The checks refresh keeps only the state and checks, so it does not spend the read.
     deploymentsRead = Effect.die("checks refresh read deployments");

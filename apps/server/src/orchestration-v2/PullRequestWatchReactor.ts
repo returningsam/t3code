@@ -166,7 +166,8 @@ const snapshotFingerprint = ({ link }: WatchTarget) => {
 };
 
 /**
- * With a host fingerprint, the detail (1 point on GitHub) is read when anything moved or a check
+ * With a host fingerprint, the detail (2 points on GitHub for an open pull request, 1 for the
+ * pull request and 1 for its head's deployments) is read when anything moved or a check
  * is still running, since check counts by state cannot tell which check finished, and the
  * activity (15 points) only when the remarks moved. Without one, both are read whenever the sync
  * snapshot moved or something is in flight.

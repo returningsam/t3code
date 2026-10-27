@@ -923,7 +923,7 @@ export const COMMIT_DEPLOYMENTS_GRAPHQL_QUERY = `query($owner: String!, $name: S
   repository(owner: $owner, name: $name) {
     object(oid: $sha) {
       ... on Commit {
-        deployments(last: 10) { nodes { environment latestStatus { state environmentUrl } } }
+        deployments(last: 50) { nodes { environment latestStatus { state environmentUrl } } }
       }
     }
   }
