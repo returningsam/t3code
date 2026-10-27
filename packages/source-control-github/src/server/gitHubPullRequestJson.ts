@@ -11,6 +11,7 @@ import type {
   PullRequestChecksState,
   PullRequestComment,
   PullRequestCommit,
+  PullRequestDeployment,
   PullRequestFileViewedState,
   PullRequestLabel,
   PullRequestMergeCapabilities,
@@ -911,6 +912,86 @@ export function decodePullRequestPreviewJson(
     author: toActor(data.repository.pullRequest.author),
     state: toState(data.repository.pullRequest),
   }));
+}
+
+/**
+ * A commit's deployments, which is where Vercel and similar hosts leave a preview link. Kept out
+ * of the core detail query: a token that cannot read deployments gets a GraphQL error, and any
+ * error fails the whole request it rides in.
+ */
+export const COMMIT_DEPLOYMENTS_GRAPHQL_QUERY = `query($owner: String!, $name: String!, $sha: GitObjectID!) {
+  repository(owner: $owner, name: $name) {
+    object(oid: $sha) {
+      ... on Commit {
+        deployments(last: 50) { nodes { environment latestStatus { state environmentUrl } } }
+      }
+    }
+  }
+}`;
+
+const decodeCommitDeployments = decodeJsonResult(
+  Schema.Struct({
+    data: Schema.Struct({
+      repository: Schema.Struct({
+        object: Schema.NullOr(
+          Schema.Struct({
+            deployments: Schema.optional(
+              Schema.Struct({
+                nodes: Schema.Array(
+                  Schema.NullOr(
+                    Schema.Struct({
+                      environment: Schema.optional(Schema.NullOr(Schema.String)),
+                      latestStatus: Schema.optional(
+                        Schema.NullOr(
+                          Schema.Struct({
+                            state: Schema.String,
+                            environmentUrl: Schema.optional(Schema.NullOr(Schema.String)),
+                          }),
+                        ),
+                      ),
+                    }),
+                  ),
+                ),
+              }),
+            ),
+          }),
+        ),
+      }),
+    }),
+  }),
+);
+
+/** States missing here are dropped, INACTIVE among them: it has nothing live to link to. */
+const DEPLOYMENT_STATUS: Readonly<Record<string, PullRequestDeployment["status"]>> = {
+  SUCCESS: "success",
+  PENDING: "pending",
+  QUEUED: "pending",
+  IN_PROGRESS: "pending",
+  WAITING: "pending",
+  FAILURE: "failure",
+  ERROR: "failure",
+};
+
+/**
+ * The newest linkable deployment per environment. A redeploy in progress may have no URL yet, so
+ * the deployment it replaces stays listed until GitHub marks that one inactive.
+ */
+export function decodeCommitDeploymentsJson(
+  raw: string,
+): Result.Result<ReadonlyArray<PullRequestDeployment>, DecodeFailure> {
+  return Result.map(decodeCommitDeployments(raw), ({ data }) => {
+    const byEnvironment = new Map<string, PullRequestDeployment>();
+    // `last:` lists oldest first, so a later deployment replaces an earlier one.
+    for (const node of data.repository.object?.deployments?.nodes ?? []) {
+      const environment = trimmed(node?.environment);
+      const url = trimmed(node?.latestStatus?.environmentUrl);
+      const status = DEPLOYMENT_STATUS[node?.latestStatus?.state ?? ""];
+      if (environment === null || url === null || status === undefined) continue;
+      if (!/^https?:\/\//i.test(url)) continue;
+      byEnvironment.set(environment, { environment, url, status });
+    }
+    return [...byEnvironment.values()];
+  });
 }
 
 /**

@@ -3,6 +3,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import type {
   EnvironmentId,
   PullRequestComment,
+  PullRequestDeployment,
   PullRequestDetailView,
   PullRequestRef,
   PullRequestReviewThread,
@@ -12,6 +13,7 @@ import {
   ArrowDownUpIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  GlobeIcon,
   HammerIcon,
   ListFilterIcon,
   TagIcon,
@@ -70,6 +72,12 @@ import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import { PullRequestConversationGhost } from "./PullRequestGhosts";
 import { sectionCollapseAnchorScrollTop } from "./pullRequestSummaryScroll.logic";
+
+const DEPLOYMENT_STATUS_LABEL = {
+  pending: "Deploying",
+  success: "Ready",
+  failure: "Failed",
+} as const satisfies Record<PullRequestDeployment["status"], string>;
 
 /** One reviewer, however a host happens to have cased their login this time. */
 function reviewerKey(login: string): string {
@@ -495,10 +503,14 @@ export function PullRequestSummaryTab({
   ];
 
   const openLink = useOpenLink(threadRef);
-  const openCheck = (url: string) => {
-    void openLink(url).catch((error: unknown) => {
+  const openExternal = (
+    url: string,
+    failureTitle: string,
+    event?: { readonly metaKey: boolean; readonly ctrlKey: boolean },
+  ) => {
+    void openLink(url, event ? { event } : undefined).catch((error: unknown) => {
       console.error(error);
-      toastManager.add({ type: "error", title: "Unable to open check details" });
+      toastManager.add({ type: "error", title: failureTitle });
     });
   };
 
@@ -771,6 +783,36 @@ export function PullRequestSummaryTab({
               </span>
             </MetaRow>
           ) : null}
+          {detail.deployments !== undefined && detail.deployments.length > 0 ? (
+            <MetaRow icon={<GlobeIcon className="size-3.5" />} label="Preview">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                {detail.deployments.map((deployment) => (
+                  <Tooltip key={deployment.environment}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className="flex min-w-0 cursor-pointer items-center gap-1.5 hover:underline"
+                          onClick={(event) =>
+                            openExternal(deployment.url, "Unable to open the preview", event)
+                          }
+                        />
+                      }
+                    >
+                      <PullRequestCheckStatusIcon status={deployment.status} still />
+                      <span className="truncate">{deployment.environment}</span>
+                      <span className="sr-only">
+                        , {DEPLOYMENT_STATUS_LABEL[deployment.status]}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipPopup side="bottom">
+                      {DEPLOYMENT_STATUS_LABEL[deployment.status]} · {deployment.url}
+                    </TooltipPopup>
+                  </Tooltip>
+                ))}
+              </span>
+            </MetaRow>
+          ) : null}
         </div>
       </section>
 
@@ -834,7 +876,9 @@ export function PullRequestSummaryTab({
                 <button
                   type="button"
                   disabled={!check.url}
-                  onClick={() => check.url && openCheck(check.url)}
+                  onClick={() =>
+                    check.url && openExternal(check.url, "Unable to open check details")
+                  }
                   className={cn(
                     "flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-2 text-left text-xs leading-5 [&>svg]:mt-0.5",
                     check.url ? "cursor-pointer" : "cursor-default",

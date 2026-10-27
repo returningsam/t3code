@@ -44,7 +44,7 @@ export function pullRequestStatus(pr: Pick<PullRequestListEntry, "state" | "isDr
   return STATES[pr.isDraft && pr.state === "open" ? "draft" : pr.state];
 }
 
-export function checkStatus(check: PullRequestCheck) {
+export function checkStatus(check: Pick<PullRequestCheck, "status">) {
   switch (check.status) {
     case "success":
       return {
