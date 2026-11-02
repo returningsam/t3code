@@ -615,6 +615,24 @@ describe("AntigravityCliAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
+  it.effect("opens a fresh conversation when the server forces a new native thread", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeAgy(yield* readFixture("two-turns.ndjson"));
+      const { runtime, ensureThread } = yield* openRuntime(fake);
+      const providerThread = yield* ensureThread();
+      const fresh = yield* runtime.ensureThread({
+        threadId: THREAD_ID,
+        modelSelection: selection(),
+        runtimePolicy: policy(),
+        existingProviderThread: { ...providerThread, nativeThreadRef: null },
+        forceNewNativeThread: true,
+      });
+      assert.equal(fake.spawns.length, 2);
+      assert.isUndefined(flagValue(fake.spawns[1], "--conversation"));
+      assert.equal(fresh.id, providerThread.id);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+
   it.effect("refuses to resume or attach a conversation agy no longer has", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeAgy(yield* readFixture("two-turns.ndjson"), {

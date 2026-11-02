@@ -397,7 +397,9 @@ function ProjectDetail({
     renameProjectOrderKey(previousKey, nextKey);
     const groupingOverride = groupingOverrides[previousKey];
     if (groupingOverride !== undefined) {
-      const { [previousKey]: _previous, ...otherOverrides } = groupingOverrides;
+      const otherOverrides = Object.fromEntries(
+        Object.entries(groupingOverrides).filter(([key]) => key !== previousKey),
+      );
       void updateClientSettings({
         sidebarProjectGroupingOverrides: { ...otherOverrides, [nextKey]: groupingOverride },
       });

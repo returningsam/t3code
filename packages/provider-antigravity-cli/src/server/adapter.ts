@@ -783,6 +783,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                 const existing = args.existingProviderThread;
                 const current = thread;
                 if (
+                  args.forceNewNativeThread !== true &&
                   current !== undefined &&
                   current.appThreadId === args.threadId &&
                   (existing === undefined || existing.id === current.id) &&
@@ -791,7 +792,9 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   return current;
                 }
                 const launch = yield* launchFor(args.modelSelection, args.runtimePolicy);
-                const requested = existing?.nativeThreadRef?.nativeId ?? undefined;
+                const requested = args.forceNewNativeThread
+                  ? undefined
+                  : (existing?.nativeThreadRef?.nativeId ?? undefined);
                 const process =
                   requested === undefined
                     ? yield* startProcess(launch, undefined)

@@ -56,6 +56,7 @@ import * as RuntimePolicy from "./RuntimePolicy.ts";
 const isDomainEvent = Schema.is(OrchestrationV2DomainEvent);
 
 const managedWorktreesDir = "/tmp/provider-turn-start-worktrees";
+const wtContainer = "/tmp/provider-turn-start-wt";
 // fs.realpath applies `..` and `.` before following symlinks.
 const normalize = (target: string) => {
   const parts: Array<string> = [];
@@ -137,6 +138,17 @@ function startWithMissingWorktree(
         IdAllocator.layer,
         Layer.succeed(FileSystem.FileSystem, {
           exists: () => Effect.succeed(false),
+          readFileString: (target: string) =>
+            normalize(target) === `${wtContainer}/.wt`
+              ? Effect.succeed("[wt]\n\tname = project\n")
+              : Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "readFileString",
+                    pathOrDescriptor: target,
+                  }),
+                ),
           realPath: (target: string) =>
             normalize(target) in realPaths
               ? Effect.succeed(realPaths[normalize(target)])
@@ -259,6 +271,21 @@ it.each([
     recreated: false,
   },
   { label: "a relative path", worktreePath: "project/feature-restore", recreated: false },
+  {
+    label: "a wt layout worktree",
+    worktreePath: `${wtContainer}/worktrees/wt-feature-restore`,
+    recreated: true,
+  },
+  {
+    label: "a folder nested below a wt layout worktree",
+    worktreePath: `${wtContainer}/worktrees/wt-feature-restore/hooks`,
+    recreated: false,
+  },
+  {
+    label: "a worktrees folder without a .wt marker",
+    worktreePath: "/tmp/provider-turn-start-project/worktrees/feature-restore",
+    recreated: false,
+  },
 ])("recreates a missing worktree only at the managed location: $label", async (input) => {
   const harness = startWithMissingWorktree(input.worktreePath, input.realPaths);
   await harness.start;

@@ -7,6 +7,7 @@ import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
 import * as ServerConfig from "./config.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { resolveWtLayout } from "./vcs/wtLayout.ts";
 
 /** Null for filesystem roots or settings not absolute on this host, including synced foreign-platform paths. */
 export function resolveWorktreesDirectory(
@@ -83,7 +84,7 @@ export const makeIsManagedWorktreePath = Effect.gen(function* () {
       realLocation,
     );
     const candidate = yield* realLocation(worktreePath);
-    return roots.some((root) => {
+    const inManagedRoot = roots.some((root) => {
       if (isFilesystemRoot(root, path)) return false;
       const relative = path.relative(root, candidate);
       const segments = relative.split(path.sep);
@@ -93,5 +94,9 @@ export const makeIsManagedWorktreePath = Effect.gen(function* () {
         segments.every((segment) => segment !== "" && segment !== "..")
       );
     });
+    if (inManagedRoot) return true;
+    // wt layout worktrees sit at <container>/worktrees/<folder> next to a <container>/.wt marker.
+    if (path.basename(path.dirname(candidate)) !== "worktrees") return false;
+    return (yield* resolveWtLayout(fileSystem, path, candidate)) !== null;
   });
 });

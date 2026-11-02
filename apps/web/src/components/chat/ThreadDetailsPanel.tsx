@@ -62,6 +62,7 @@ interface ThreadDetailsPanelProps extends Pick<
   openInShortcutEnabled: boolean;
   gitCwd: string | null;
   isGitRepo: boolean;
+  canReviewChanges: boolean;
   envLocked: boolean;
   availableEnvironments: readonly EnvironmentOption[];
   autoEnvironmentLabel?: string | undefined;
@@ -157,7 +158,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
           git:
             props.gitCwd !== null &&
             props.activeProjectName !== undefined &&
-            (visible.gitActions || (visible.changes && props.isGitRepo)),
+            (visible.gitActions || (visible.changes && props.canReviewChanges)),
         };
         return (
           <>
