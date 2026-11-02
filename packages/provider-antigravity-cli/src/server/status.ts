@@ -74,18 +74,21 @@ const snapshot = (
   supportsTextGeneration: false,
 });
 
-const runAgy = (command: string, args: ReadonlyArray<string>, environment: NodeJS.ProcessEnv) =>
-  Effect.gen(function* () {
-    const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
-    return yield* spawnAndCollect(
-      command,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: environment,
-        extendEnv: false,
-        shell: spawnCommand.shell,
-      }),
-    );
-  });
+const runAgy = Effect.fn("AntigravityCliStatus.runAgy")(function* (
+  command: string,
+  args: ReadonlyArray<string>,
+  environment: NodeJS.ProcessEnv,
+) {
+  const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
+  return yield* spawnAndCollect(
+    command,
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      env: environment,
+      extendEnv: false,
+      shell: spawnCommand.shell,
+    }),
+  );
+});
 
 export const buildInitialAntigravityCliSnapshot = (settings: AntigravityCliSettings) =>
   Effect.map(DateTime.now, (now) =>

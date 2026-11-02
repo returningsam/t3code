@@ -46,6 +46,7 @@ function layer(input: {
         invalidateStatus: () => Effect.void,
       }),
     ),
+    Layer.provide(NodeServices.layer),
   );
 }
 
@@ -398,6 +399,7 @@ describe("GitWorkflowService", () => {
           status,
         }),
       ),
+      Layer.provide(NodeServices.layer),
     );
 
     return Effect.gen(function* () {

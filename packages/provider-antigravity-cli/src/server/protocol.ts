@@ -1,15 +1,6 @@
-/**
- * The agy print-mode protocol: launch arguments, the stdin message, stdout
- * events, and the `agy models` listing.
- *
- * agy runs as `agy --input-format stream-json --output-format stream-json -p=`.
- * Each stdin line starts one turn. Stdout is NDJSON: `init` once the
- * conversation is open, `step_update` for each user input, response, and tool
- * step, and `result` when the turn ends. Lines that are not JSON events (agy
- * prints some errors as plain text) are skipped.
- *
- * @module provider-antigravity-cli/server/protocol
- */
+// agy runs as `agy --input-format stream-json --output-format stream-json -p=`. Each stdin line
+// starts a turn. Stdout is NDJSON (`init`, `step_update`, `result`); agy prints some errors as
+// plain text, so lines that are not JSON events are skipped.
 import {
   type ModelCapabilities,
   type ModelSelection,
