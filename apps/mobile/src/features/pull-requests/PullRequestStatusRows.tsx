@@ -6,19 +6,28 @@ import type {
   PullRequestDeployment,
   PullRequestDetail,
 } from "@t3tools/contracts";
+import {
+  capitalizeTerm,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
 import Animated from "react-native-reanimated";
 import { PR_ROW_LAYOUT, PR_DISCLOSURE_ENTER, PR_ROW_EXIT } from "./pullRequestAnimations";
 import { useState } from "react";
 import { Linking, Pressable, View } from "react-native";
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
-import { ControlPillMenu } from "../../components/ControlPillMenu";
+import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { Menu } from "../../components/ui/Menu";
 import { PullRequestAvatar } from "./PullRequestPresentation";
 import { PullRequestCardRow } from "./PullRequestControls";
 import { PullRequestAgentRow } from "./PullRequestAgentRow";
+import { PullRequestGlyph } from "./pullRequestGlyphs";
 import { composerPullRequests } from "../../state/pull-requests";
 import { useEnvironmentQuery } from "../../state/query";
-import { allowedUpdateMethods, PR_ACTION_ICONS, PR_ACTION_LABELS } from "./pullRequestActions";
+import {
+  allowedUpdateMethods,
+  PR_ACTION_ICONS,
+  pullRequestActionLabel,
+} from "./pullRequestActions";
 import {
   checkStatus,
   pullRequestBranchSummary,
@@ -57,10 +66,12 @@ export function PullRequestStatusMenu(props: RowProps) {
   const action = usePullRequestAction(props.params, props.pr);
   const actions = STATUS_ACTIONS.filter(action.available);
   const status = pullRequestStatus(props.pr);
+  const terminology = sourceControlClients.get(props.pr.provider).changeRequest;
+  const term = capitalizeTerm(terminology.singular);
   const trigger = (
     <Pressable
       accessibilityRole={actions.length ? "button" : undefined}
-      accessibilityLabel={`Pull request status, ${status.label}`}
+      accessibilityLabel={`${term} status, ${status.label}`}
       disabled={!actions.length}
       className="min-h-8 flex-row items-center gap-1.5 active:opacity-70"
     >
@@ -73,11 +84,11 @@ export function PullRequestStatusMenu(props: RowProps) {
   );
   if (!actions.length) return trigger;
   return (
-    <ControlPillMenu
-      title="Pull request status"
+    <Menu
+      title={`${term} status`}
       actions={actions.map((id) => ({
         id,
-        title: PR_ACTION_LABELS[id],
+        title: pullRequestActionLabel(id, terminology),
         image: PR_ACTION_ICONS[id],
         attributes: { destructive: id === "close" },
       }))}
@@ -87,20 +98,20 @@ export function PullRequestStatusMenu(props: RowProps) {
         if (selected === "close")
           action.confirm(
             selected,
-            "Close pull request",
-            "Close this pull request without merging its changes?",
+            pullRequestActionLabel("close", terminology),
+            `Close this ${terminology.singular} without merging its changes?`,
           );
         else if (selected === "revert")
           action.confirm(
             selected,
-            "Create revert pull request",
-            "Open a new pull request that reverses these changes?",
+            pullRequestActionLabel("revert", terminology),
+            `Open a new ${terminology.singular} that reverses these changes?`,
           );
         else void action.perform(selected);
       }}
     >
       {trigger}
-    </ControlPillMenu>
+    </Menu>
   );
 }
 
@@ -108,6 +119,7 @@ export function PullRequestChecksRow(props: RowProps) {
   const [expanded, setExpanded] = useState(false);
   const checks = pullRequestChecksSummary(props.pr);
   const action = usePullRequestAction(props.params, props.pr);
+  const definition = sourceControlClients.get(props.pr.provider);
   return (
     <Animated.View layout={PR_ROW_LAYOUT}>
       <PullRequestCardRow
@@ -140,7 +152,7 @@ export function PullRequestChecksRow(props: RowProps) {
                 action.confirm(
                   "approve-workflows",
                   "Approve workflows",
-                  "Allow this pull request's workflows to run? Review the workflow changes first.",
+                  `Allow this ${definition.changeRequest.singular}'s workflows to run? Review the workflow changes first.`,
                 )
               }
             />
@@ -170,7 +182,7 @@ export function PullRequestChecksRow(props: RowProps) {
             icon="arrow.up.right"
             onPress={() =>
               void Linking.openURL(
-                props.pr.provider === "github" ? `${props.pr.url}/checks` : props.pr.url,
+                definition.changeRequestChecksUrl?.(props.pr.url) ?? props.pr.url,
               )
             }
           />
@@ -222,7 +234,9 @@ export function PullRequestBranchRow(props: RowProps) {
             ? `No conflicts with ${props.pr.baseBranch}`
             : "Branch"
       }
-      icon={conflicting ? "exclamationmark.triangle" : clean ? "checkmark.circle" : "arrow.branch"}
+      icon={
+        conflicting ? PullRequestGlyph.conflicting : clean ? "checkmark.circle" : "arrow.branch"
+      }
       tint={
         conflicting
           ? "accent-danger-foreground"
@@ -242,7 +256,7 @@ export function PullRequestBranchRow(props: RowProps) {
   );
   if (!methods.length && !canResolve) return row;
   return (
-    <ControlPillMenu
+    <Menu
       title="Branch"
       actions={[
         ...(canResolve ? [agent.menuAction("conflicts")] : []),
@@ -255,7 +269,7 @@ export function PullRequestBranchRow(props: RowProps) {
       }}
     >
       {row}
-    </ControlPillMenu>
+    </Menu>
   );
 }
 

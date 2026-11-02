@@ -1,13 +1,5 @@
-/**
- * Skill discovery and invocation for the `agy` CLI.
- *
- * agy has no command that lists skills, so T3 scans the folders agy loads
- * them from. Each root holds one folder per skill with a `SKILL.md`. Plugin
- * skills live under `~/.gemini/config/plugins/<plugin>/skills` and are
- * invoked as `<plugin>:<skill>`.
- *
- * @module provider-antigravity-cli/server/skills
- */
+// agy has no command that lists skills, so this scans the folders agy loads them from. Plugin
+// skills live under `~/.gemini/config/plugins/<plugin>/skills` and are invoked as `<plugin>:<skill>`.
 import type { ServerProviderSkill } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";

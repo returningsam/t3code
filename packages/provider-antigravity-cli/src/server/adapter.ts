@@ -1,18 +1,6 @@
-/**
- * AntigravityCliAdapterV2 drives the user's `agy` binary in print mode.
- *
- * A session keeps one agy process open on its conversation and writes one
- * stdin line per turn. The `init` conversation ID is the thread's resume
- * handle. A process is fixed to the model, effort, and permission flags it was
- * launched with, so a turn that needs different ones restarts it on the same
- * conversation with `--conversation`. Stop terminates the process; the next
- * turn resumes the conversation.
- *
- * Print mode cannot ask for approval: agy denies actions its own rules do not
- * allow and lists them on the turn's result, which becomes a notice.
- *
- * @module provider-antigravity-cli/server/adapter
- */
+// One agy process per session, one stdin line per turn. A process is fixed to its launch flags,
+// so a turn that needs other ones restarts it on the same conversation with `--conversation`.
+// Print mode cannot ask for approval: agy lists the actions it denied on the turn's result.
 import {
   ProviderDriverKind,
   type OrchestrationV2ProviderCapabilities,
@@ -236,8 +224,14 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver: DRIVER,
-    getCapabilities: () => Effect.succeed(AntigravityCliCapabilitiesV2),
-    planSelectionTransition: () => Effect.succeed(turnScopedSelectionTransition()),
+    getCapabilities: Effect.fn("AntigravityCliAdapterV2.getCapabilities")(function () {
+      return Effect.succeed(AntigravityCliCapabilitiesV2);
+    }),
+    planSelectionTransition: Effect.fn("AntigravityCliAdapterV2.planSelectionTransition")(
+      function () {
+        return Effect.succeed(turnScopedSelectionTransition());
+      },
+    ),
     openSession: Effect.fn("AntigravityCliAdapterV2.openSession")(function* (
       input: ProviderAdapter.ProviderAdapterV2OpenSessionInput,
     ) {
@@ -789,6 +783,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                 const existing = args.existingProviderThread;
                 const current = thread;
                 if (
+                  args.forceNewNativeThread !== true &&
                   current !== undefined &&
                   current.appThreadId === args.threadId &&
                   (existing === undefined || existing.id === current.id) &&
@@ -797,7 +792,9 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   return current;
                 }
                 const launch = yield* launchFor(args.modelSelection, args.runtimePolicy);
-                const requested = existing?.nativeThreadRef?.nativeId ?? undefined;
+                const requested = args.forceNewNativeThread
+                  ? undefined
+                  : (existing?.nativeThreadRef?.nativeId ?? undefined);
                 const process =
                   requested === undefined
                     ? yield* startProcess(launch, undefined)
@@ -871,13 +868,14 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   return yield* protocolError("agy already has an active turn");
                 }
                 const skills = yield* options.discoverSkills(cwd);
-                const text = providerMessageTextWithAttachmentPaths({
+                const text = yield* providerMessageTextWithAttachmentPaths({
                   text: rewriteAgySkillMentions(
                     turnInput.message.text,
                     new Set(skills.map((skill) => skill.name)),
                   ),
                   attachments: turnInput.message.attachments,
                   resolveAttachmentPath: host.resolveAttachmentPath,
+                  resolveExtractedTextPath: host.resolveExtractedTextPath,
                 });
                 if (text.trim().length === 0) return yield* protocolError("agy needs a message");
                 const launch = yield* launchFor(turnInput.modelSelection, turnInput.runtimePolicy);
@@ -956,8 +954,8 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
               providerThreadId: args.providerThread.id,
             }),
           ),
-        interruptTurn: (args) =>
-          Effect.gen(function* () {
+        interruptTurn: Effect.fn("AntigravityCliAdapterV2.interruptTurn")(
+          function* (args) {
             const turn = active;
             // A settled turn has nothing left to stop.
             if (turn === undefined && args.requestRuntimeRestart === true) return;
@@ -977,17 +975,20 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                 stopProcess(turn.process).pipe(Effect.andThen(finish(turn, "interrupted"))),
               );
             }
-          }).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ProviderAdapter.ProviderAdapterInterruptError({
-                  driver: DRIVER,
-                  providerThreadId: args.providerThread.id,
-                  providerTurnId: args.providerTurnId,
-                  cause,
-                }),
+          },
+          (effect, args) =>
+            effect.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterInterruptError({
+                    driver: DRIVER,
+                    providerThreadId: args.providerThread.id,
+                    providerTurnId: args.providerTurnId,
+                    cause,
+                  }),
+              ),
             ),
-          ),
+        ),
         respondToRuntimeRequest: (args) =>
           Effect.fail(
             new ProviderAdapter.ProviderAdapterRuntimeRequestResponseError({

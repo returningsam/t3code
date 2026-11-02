@@ -1,15 +1,15 @@
-import type * as Path from "effect/Path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 
-/**
- * Directory new worktrees are created under: the `worktreesDirectory`
- * setting (`~` expands to `home`), or `defaultDir` (`<T3 home>/worktrees`)
- * when it is empty. Null when
- * the setting is not an absolute path on this machine, such as `D:\worktrees`
- * configured for a Windows server and synced to a Linux one, or when it is a
- * filesystem root, which would make every path on that drive look managed.
- */
+import * as ServerConfig from "./config.ts";
+import * as ServerSettings from "./serverSettings.ts";
+import { resolveWtLayout } from "./vcs/wtLayout.ts";
+
+/** Null for filesystem roots or settings not absolute on this host, including synced foreign-platform paths. */
 export function resolveWorktreesDirectory(
   setting: string,
   defaultDir: string,
@@ -28,7 +28,6 @@ export function isFilesystemRoot(directory: string, path: Path.Path): boolean {
   return path.dirname(directory) === directory;
 }
 
-/** Every directory that holds T3-managed worktrees on this machine. */
 export function managedWorktreesDirectories(
   settings: {
     readonly worktreesDirectory: string;
@@ -45,3 +44,59 @@ export function managedWorktreesDirectories(
   }
   return [...directories];
 }
+
+// Client paths/branches are untrusted; recreate only real paths matching managed-folder/repo/branch.
+export const makeIsManagedWorktreePath = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
+
+  // Match Git's symlink-following location: nearest real ancestor plus missing path components.
+  const realLocation = (target: string): Effect.Effect<string> =>
+    fileSystem.realPath(target).pipe(
+      Effect.catch(() => {
+        const parent = path.dirname(target);
+        return parent === target
+          ? Effect.succeed(target)
+          : Effect.map(realLocation(parent), (real) => path.join(real, path.basename(target)));
+      }),
+    );
+
+  return Effect.fn("worktreesDirectory.isManagedWorktreePath")(function* (worktreePath: string) {
+    // git resolves a relative path against the project, not the server cwd.
+    if (!path.isAbsolute(worktreePath)) return false;
+    // Require normalized paths; Git and realPath disagree on .. after symlink traversal.
+    if (path.resolve(worktreePath) !== worktreePath) return false;
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.orElseSucceed(() => ({
+        worktreesDirectory: "",
+        previousWorktreesDirectories: [],
+      })),
+    );
+    const roots = yield* Effect.forEach(
+      managedWorktreesDirectories(
+        settings,
+        serverConfig.worktreesDir,
+        path,
+        yield* HostProcess.HomeDirectory,
+      ),
+      realLocation,
+    );
+    const candidate = yield* realLocation(worktreePath);
+    const inManagedRoot = roots.some((root) => {
+      if (isFilesystemRoot(root, path)) return false;
+      const relative = path.relative(root, candidate);
+      const segments = relative.split(path.sep);
+      return (
+        !path.isAbsolute(relative) &&
+        segments.length === 2 &&
+        segments.every((segment) => segment !== "" && segment !== "..")
+      );
+    });
+    if (inManagedRoot) return true;
+    // wt layout worktrees sit at <container>/worktrees/<folder> next to a <container>/.wt marker.
+    if (path.basename(path.dirname(candidate)) !== "worktrees") return false;
+    return (yield* resolveWtLayout(fileSystem, path, candidate)) !== null;
+  });
+});

@@ -70,80 +70,86 @@ export const AntigravityCliDriver: ProviderDriver<AntigravityCliSettings, Antigr
     metadata: { displayName: "Antigravity CLI", supportsMultipleInstances: true },
     configSchema: AntigravityCliSettings,
     defaultConfig: () => decodeSettings({}),
-    create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-      Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const processEnvironment = yield* mergeProviderInstanceEnvironment(environment);
-        const discoverSkills = (cwd: string) =>
-          discoverAgySkills(cwd, processEnvironment).pipe(
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-            Effect.provideService(Path.Path, path),
-          );
-        const settings = { ...config, enabled } satisfies AntigravityCliSettings;
-        const continuationIdentity = defaultProviderContinuationIdentity({
-          driverKind: DRIVER,
-          instanceId,
-        });
-        const stampIdentity = withInstanceIdentity({
-          instanceId,
-          driverKind: DRIVER,
-          displayName,
-          accentColor,
-          continuationGroupKey: continuationIdentity.continuationKey,
-        });
-
-        const snapshotSettings = yield* makeProviderSnapshotSettingsSource(settings);
-        const snapshot = yield* makeManagedServerProvider<
-          ProviderSnapshotSettings<AntigravityCliSettings>
-        >({
-          resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
-          getSettings: snapshotSettings.getSettings,
-          streamSettings: snapshotSettings.streamSettings,
-          haveSettingsChanged: haveProviderSnapshotSettingsChanged,
-          initialSnapshot: (current) =>
-            buildInitialAntigravityCliSnapshot(current.provider).pipe(Effect.map(stampIdentity)),
-          checkProvider: checkAntigravityCliStatus(settings, processEnvironment).pipe(
-            Effect.map(stampIdentity),
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProviderDriverError({
-                driver: DRIVER,
-                instanceId,
-                detail: "Failed to build the Antigravity CLI snapshot.",
-                cause,
-              }),
-          ),
+    create: Effect.fn("AntigravityCliDriver.create")(function* ({
+      instanceId,
+      displayName,
+      accentColor,
+      environment,
+      enabled,
+      config,
+    }) {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const processEnvironment = yield* mergeProviderInstanceEnvironment(environment);
+      const discoverSkills = (cwd: string) =>
+        discoverAgySkills(cwd, processEnvironment).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
         );
+      const settings = { ...config, enabled } satisfies AntigravityCliSettings;
+      const continuationIdentity = defaultProviderContinuationIdentity({
+        driverKind: DRIVER,
+        instanceId,
+      });
+      const stampIdentity = withInstanceIdentity({
+        instanceId,
+        driverKind: DRIVER,
+        displayName,
+        accentColor,
+        continuationGroupKey: continuationIdentity.continuationKey,
+      });
 
-        const orchestrationAdapter = yield* makeAntigravityCliAdapterV2({
-          instanceId,
-          settings,
-          environment: processEnvironment,
-          models: snapshot.getSnapshot.pipe(Effect.map((current) => current.models)),
-          discoverSkills,
-        });
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(settings);
+      const snapshot = yield* makeManagedServerProvider<
+        ProviderSnapshotSettings<AntigravityCliSettings>
+      >({
+        resolveMaintenance: () => Effect.succeed(MAINTENANCE_CAPABILITIES),
+        getSettings: snapshotSettings.getSettings,
+        streamSettings: snapshotSettings.streamSettings,
+        haveSettingsChanged: haveProviderSnapshotSettingsChanged,
+        initialSnapshot: (current) =>
+          buildInitialAntigravityCliSnapshot(current.provider).pipe(Effect.map(stampIdentity)),
+        checkProvider: checkAntigravityCliStatus(settings, processEnvironment).pipe(
+          Effect.map(stampIdentity),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER,
+              instanceId,
+              detail: "Failed to build the Antigravity CLI snapshot.",
+              cause,
+            }),
+        ),
+      );
 
-        return {
-          instanceId,
-          driverKind: DRIVER,
-          continuationIdentity,
-          displayName,
-          accentColor,
-          enabled,
-          snapshot,
-          snapshotForCwd: (cwd: string) =>
-            enabled
-              ? Effect.all([snapshot.getSnapshot, discoverSkills(cwd)]).pipe(
-                  Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
-                )
-              : snapshot.getSnapshot,
-          orchestrationAdapter,
-          textGeneration: unsupportedTextGeneration,
-        } satisfies ProviderInstance;
-      }),
+      const orchestrationAdapter = yield* makeAntigravityCliAdapterV2({
+        instanceId,
+        settings,
+        environment: processEnvironment,
+        models: snapshot.getSnapshot.pipe(Effect.map((current) => current.models)),
+        discoverSkills,
+      });
+
+      return {
+        instanceId,
+        driverKind: DRIVER,
+        continuationIdentity,
+        displayName,
+        accentColor,
+        enabled,
+        snapshot,
+        snapshotForCwd: (cwd: string) =>
+          enabled
+            ? Effect.all([snapshot.getSnapshot, discoverSkills(cwd)]).pipe(
+                Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
+              )
+            : snapshot.getSnapshot,
+        orchestrationAdapter,
+        textGeneration: unsupportedTextGeneration,
+      } satisfies ProviderInstance;
+    }),
   };

@@ -8,7 +8,7 @@ import type * as Path from "effect/Path";
  * `<container>/main` and worktrees under `<container>/worktrees`. Written by the wt
  * plugin's `/wt:setup` in git-config format.
  */
-export const WT_LAYOUT_FILE_NAME = ".wt";
+const WT_LAYOUT_FILE_NAME = ".wt";
 
 export interface WtLayout {
   readonly container: string;
@@ -61,17 +61,16 @@ export function parseWtLayoutFile(contents: string): Pick<WtLayout, "name"> {
  * (`<container>/<dir>`) or a worktree (`<container>/worktrees/<dir>`). Null when the
  * container has no `.wt` file.
  */
-export const resolveWtLayout = (
+export const resolveWtLayout = Effect.fn("resolveWtLayout")(function* (
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
   checkoutRoot: string,
-): Effect.Effect<WtLayout | null> =>
-  Effect.gen(function* () {
-    const parent = path.dirname(checkoutRoot);
-    const container = path.basename(parent) === "worktrees" ? path.dirname(parent) : parent;
-    const contents = yield* fileSystem
-      .readFileString(path.join(container, WT_LAYOUT_FILE_NAME))
-      .pipe(Effect.option);
-    if (Option.isNone(contents)) return null;
-    return { container, ...parseWtLayoutFile(contents.value) };
-  });
+): Effect.fn.Return<WtLayout | null> {
+  const parent = path.dirname(checkoutRoot);
+  const container = path.basename(parent) === "worktrees" ? path.dirname(parent) : parent;
+  const contents = yield* fileSystem
+    .readFileString(path.join(container, WT_LAYOUT_FILE_NAME))
+    .pipe(Effect.option);
+  if (Option.isNone(contents)) return null;
+  return { container, ...parseWtLayoutFile(contents.value) };
+});

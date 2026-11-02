@@ -14,6 +14,7 @@ import {
   CircleCheckIcon,
   CircleDashedIcon,
   CircleDotIcon,
+  CircleSlashIcon,
   CircleXIcon,
   UserCheckIcon,
   UserRoundIcon,
@@ -35,15 +36,6 @@ import {
   type PullRequestGlyphIcon,
 } from "./pullRequestIcons";
 
-/**
- * A host label as a flat tinted tag in the label's own color: a wash of it behind, the name
- * in a mix of it and the theme foreground. The mix leans to the foreground because hosts hand
- * out any color at all: at 30% of the label on light and 45% on dark, white, black and
- * GitHub's pale yellows all clear 4.5:1 on their wash, selected row included, and
- * saturated colors sit well above.
- * A label with no usable color falls back to the muted tag. Children ride after the name,
- * for an overflow count. The height is pinned so a labeled row is as tall as one without.
- */
 export function PullRequestLabelChip({
   label,
   size = "sm",
@@ -69,11 +61,6 @@ export function PullRequestLabelChip({
   );
 }
 
-/**
- * The review verdict as one glyph beside the checks glyph, so a row answers both "does it
- * build" and "did someone say yes" in the same spot. "Awaiting review" is only drawn when the
- * host reports it, which on GitHub means the branch rules require a review nobody has given.
- */
 function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
   switch (decision) {
     case "approved":
@@ -114,13 +101,6 @@ export function PullRequestReviewDecisionGlyph({
   );
 }
 
-/**
- * How a pull request's state reads anywhere it appears: the thread badge, the right-panel tab,
- * the list, and the detail header all resolve through here so one pull request cannot look like
- * two different things in two places.
- *
- * Closed and merged take precedence over a stale draft flag.
- */
 export function resolvePullRequestState(input: {
   readonly state: PullRequestState;
   readonly isDraft: boolean;
@@ -135,7 +115,7 @@ export interface PullRequestConflictPresentation {
   readonly Icon: PullRequestGlyphIcon;
 }
 
-export function resolvePullRequestConflict(input: {
+function resolvePullRequestConflict(input: {
   readonly state: PullRequestState;
   readonly isDraft: boolean;
   readonly mergeability?: PullRequestMergeability;
@@ -163,8 +143,6 @@ export function PullRequestStateGlyph({
   const presentation = resolvePullRequestState({ state, isDraft });
   return (
     <Tooltip>
-      {/* The list row is itself a button, so the trigger stays a span: an interactive one would
-          nest a control inside that button and steal the row's click target. */}
       <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
         <presentation.Icon
           role="img"
@@ -225,7 +203,7 @@ const CHECK_STATUS_PRESENTATION = {
   },
   failure: { label: "Failed", Icon: CircleXIcon, toneClassName: "text-destructive" },
   cancelled: { label: "Cancelled", Icon: CircleXIcon, toneClassName: "text-destructive" },
-  skipped: { label: "Skipped", Icon: CircleDashedIcon, toneClassName: "text-muted-foreground/70" },
+  skipped: { label: "Skipped", Icon: CircleSlashIcon, toneClassName: "text-muted-foreground/70" },
   neutral: { label: "Neutral", Icon: CircleDashedIcon, toneClassName: "text-muted-foreground/70" },
 } as const satisfies Record<
   PullRequestCheckStatus,
@@ -264,10 +242,6 @@ export function PullRequestCheckStatusIcon({
   return <Icon aria-hidden className={cn("size-3.5 shrink-0", presentation.toneClassName)} />;
 }
 
-/**
- * The rollup a listing row carries, which is one word rather than the checks behind it. The
- * headline is GitHub's own wording, so a reader who knows that page reads this one the same way.
- */
 const CHECKS_STATE_PRESENTATION = {
   passing: {
     label: "All checks have passed",
@@ -309,12 +283,6 @@ export function PullRequestChecksStateGlyph({ state }: { state: PullRequestCheck
   );
 }
 
-/**
- * The same rollup the server sends with a listing row, worked out here from the checks a detail
- * already holds — so the header shows the icon without a second field travelling with it.
- *
- * Null for a change request with no checks: nothing to show beats a tick nobody earned.
- */
 export function pullRequestChecksState(
   checks: ReadonlyArray<PullRequestCheck>,
 ): PullRequestChecksState | null {
@@ -325,14 +293,6 @@ export function pullRequestChecksState(
   return statuses.has("success") ? "passing" : null;
 }
 
-/**
- * How a verdict reads, in the one place every surface takes it from. The green is the green a
- * passing check already wears in the same panel, so "approved" and "all checks passed" cannot
- * look like two different kinds of good news.
- *
- * The ring runs a shade stronger than the text tones. At 16px across it is a thin arc, and the
- * muted pairing that reads well as a word was barely there as an outline.
- */
 const REVIEW_OUTCOME_PRESENTATION = {
   approved: {
     label: "Approved",
@@ -341,6 +301,7 @@ const REVIEW_OUTCOME_PRESENTATION = {
     ringClassName: "ring-2 ring-emerald-500 dark:ring-emerald-400",
     staleRingClassName:
       "ring-2 ring-[color-mix(in_srgb,var(--color-emerald-500)_35%,var(--background))] dark:ring-[color-mix(in_srgb,var(--color-emerald-400)_35%,var(--background))]",
+    fillClassName: "fill-emerald-500 dark:fill-emerald-400",
     badgeVariant: "success",
   },
   "changes-requested": {
@@ -349,6 +310,7 @@ const REVIEW_OUTCOME_PRESENTATION = {
     toneClassName: "text-destructive",
     ringClassName: "ring-2 ring-destructive",
     staleRingClassName: "ring-2 ring-[color-mix(in_srgb,var(--destructive)_35%,var(--background))]",
+    fillClassName: "fill-destructive",
     badgeVariant: "error",
   },
   dismissed: {
@@ -358,6 +320,7 @@ const REVIEW_OUTCOME_PRESENTATION = {
     ringClassName: "ring-2 ring-muted-foreground/60",
     staleRingClassName:
       "ring-2 ring-[color-mix(in_srgb,var(--contrast-muted-foreground)_30%,var(--background))]",
+    fillClassName: "fill-muted-foreground",
     badgeVariant: "outline",
   },
 } as const satisfies Record<
@@ -368,6 +331,7 @@ const REVIEW_OUTCOME_PRESENTATION = {
     toneClassName: string;
     ringClassName: string;
     staleRingClassName: string;
+    fillClassName: string;
     badgeVariant: "success" | "error" | "outline";
   }
 >;
@@ -376,13 +340,7 @@ export function pullRequestReviewOutcomeToneClassName(outcome: PullRequestReview
   return REVIEW_OUTCOME_PRESENTATION[outcome].toneClassName;
 }
 
-/** Worn by whatever wraps a reviewer's avatar, so their verdict reads without a row of its own. */
-/**
- * A faded verdict is mixed into the background rather than made translucent. The ring is the only
- * separator an avatar carrying one has — the summary drops the opaque `ring-background` where a
- * verdict is drawn — and the stack overlaps by 4px, so an alpha ring would let the neighbour show
- * straight through it and the two faces would merge.
- */
+// Mix rings with the background to prevent avatars showing through their overlap.
 export function pullRequestReviewOutcomeRingClassName(
   outcome: PullRequestReviewOutcome,
   stale = false,
@@ -391,15 +349,10 @@ export function pullRequestReviewOutcomeRingClassName(
   return stale ? presentation.staleRingClassName : presentation.ringClassName;
 }
 
-/**
- * What a superseded verdict says, which is the same word with when it applied added. Commits
- * landed after it, so it stands for code the branch no longer has.
- */
 export function pullRequestReviewOutcomeStaleLabel(outcome: PullRequestReviewOutcome): string {
   return `${REVIEW_OUTCOME_PRESENTATION[outcome].label} earlier changes`;
 }
 
-/** Decorative: every caller says which verdict this is in words beside it. */
 export function PullRequestReviewOutcomeIcon({
   outcome,
   className,
@@ -412,6 +365,28 @@ export function PullRequestReviewOutcomeIcon({
     <presentation.Icon
       aria-hidden
       className={cn("size-3.5 shrink-0", presentation.toneClassName, className)}
+    />
+  );
+}
+
+// Ring color alone blends into colorful bot avatars; the glyph gives each verdict a shape.
+export function PullRequestReviewOutcomeAvatarBadge({
+  outcome,
+  stale = false,
+}: {
+  outcome: PullRequestReviewOutcome;
+  stale?: boolean;
+}) {
+  const presentation = REVIEW_OUTCOME_PRESENTATION[outcome];
+  return (
+    <presentation.Icon
+      aria-hidden
+      strokeWidth={3}
+      className={cn(
+        "absolute -right-1 -bottom-1 size-3 text-background",
+        presentation.fillClassName,
+        stale && "opacity-50",
+      )}
     />
   );
 }
@@ -430,8 +405,10 @@ export function PullRequestReviewOutcomeBadge({
   const presentation = REVIEW_OUTCOME_PRESENTATION[outcome];
   return (
     <Badge size="sm" variant={presentation.badgeVariant} className={className}>
-      <presentation.Icon aria-hidden className="size-3" />
-      {presentation.label}
+      <span className="inline-flex items-baseline gap-1">
+        <presentation.Icon aria-hidden className="size-3 self-center" />
+        <span>{presentation.label}</span>
+      </span>
     </Badge>
   );
 }
@@ -447,7 +424,6 @@ export function PullRequestActorAvatar({
   const avatarUrl = actor?.avatarUrl ?? null;
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   return avatarUrl === null || failedAvatarUrl === avatarUrl ? (
-    // Not every host reports an avatar, and a private host may refuse the browser's request.
     <span
       aria-hidden
       className={cn(
@@ -469,12 +445,6 @@ export function PullRequestActorAvatar({
   );
 }
 
-/**
- * GitHub attributes work from a deleted account to "ghost"; say the same word everywhere.
- *
- * An actor as a login beside its avatar, or as the avatar alone. With a profile URL the actor
- * is an inline link; `className` places it and never restyles it.
- */
 export function PullRequestActorLabel({
   actor,
   className,
@@ -490,8 +460,8 @@ export function PullRequestActorLabel({
 }) {
   const login = actor?.login ?? "ghost";
   const label = (
-    <span className={cn("flex min-w-0 items-center", variant === "label" && "gap-1.5")}>
-      <PullRequestActorAvatar actor={actor} />
+    <span className={cn("flex min-w-0 items-baseline", variant === "label" && "gap-1.5")}>
+      <PullRequestActorAvatar actor={actor} className="self-center" />
       <span className={variant === "label" ? "truncate font-medium text-foreground" : "sr-only"}>
         {login}
       </span>
@@ -530,7 +500,6 @@ export function PullRequestActorLabel({
   );
 }
 
-/** Added and removed lines, coloured the way every host colours them. */
 export function PullRequestDiffStat({
   additions,
   deletions,
@@ -540,8 +509,6 @@ export function PullRequestDiffStat({
   deletions: number;
   className?: string;
 }) {
-  // Not every host reports line counts. Showing "+0 -0" would read as an empty change set
-  // rather than as a missing one, so the stat is left out instead.
   if (additions === 0 && deletions === 0) {
     return null;
   }
@@ -553,13 +520,6 @@ export function PullRequestDiffStat({
   );
 }
 
-/**
- * Dot-separated metadata. It owns the separator, and draws one only between the segments that
- * survive, so a caller can render `{condition ? <span/> : null}` without leaving a stray dot.
- * `Children.toArray` drops the nullish entries and keys what remains, which a plain array
- * check would not do for a single child or a fragment. A separator borrows the key of the
- * segment it precedes, so it stays stable without counting positions.
- */
 function separatorKey(segment: ReactNode): string {
   return `separator:${isValidElement(segment) ? String(segment.key) : String(segment)}`;
 }
