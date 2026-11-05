@@ -3727,6 +3727,29 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("loads an untracked nested repository requested by its own path", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const pathService = yield* Path.Path;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* initRepoWithCommit(cwd);
+        yield* initRepoIn(pathService.join(cwd, "nested"));
+
+        const source = sourceOf(
+          yield* driver.getReviewDiffPreview({
+            cwd,
+            file: { path: "nested", previousPath: null, sourceKind: "working-tree" },
+          }),
+          "working-tree",
+        );
+
+        assert.deepStrictEqual(
+          source.files?.map((file) => file.path),
+          ["nested"],
+        );
+      }),
+    );
+
     it.effect("compares a moved submodule from the commit its parent pins", () =>
       Effect.gen(function* () {
         const pathService = yield* Path.Path;
