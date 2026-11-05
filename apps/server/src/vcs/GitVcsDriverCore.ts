@@ -3742,8 +3742,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   ) {
     const hashDiff = (patch: ReviewPatch) =>
-      crypto
-        .digest("SHA-256", utf8Encoder.encode(JSON.stringify([patch.stdout, patch.files ?? []])))
+      digest
+        .digest(
+          Digest.sha256,
+          utf8Encoder.encode(JSON.stringify([patch.stdout, patch.files ?? []])),
+        )
         .pipe(
           Effect.map(Hex.encode),
           Effect.mapError(

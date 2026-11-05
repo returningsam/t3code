@@ -2313,6 +2313,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const clone = path.join(nestedCwd, "clone");
         yield* fileSystem.makeDirectory(clone);
         yield* initRepoWithCommit(clone);
+        yield* writeTextFile(clone, "edited.txt", "new\n");
         const projectDirectories = [nestedCwd];
         if (symlinksSupported) {
           const alias = path.join(directory, "alias");

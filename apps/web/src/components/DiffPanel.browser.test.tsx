@@ -212,3 +212,30 @@ it.each([
     });
   },
 );
+
+it("offers no comparison target for a folder of repositories", async () => {
+  using context = setup(null);
+  state.previews.set(null, Atom.make(AsyncResult.success(preview())));
+  state.status = Atom.make(
+    AsyncResult.success({
+      isRepo: false,
+      hasNestedRepositories: true,
+      hasPrimaryRemote: false,
+      isDefaultRef: false,
+      refName: null,
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+      hasUpstream: false,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: null,
+    }),
+  );
+  await using screen = await render(
+    <RegistryContext.Provider value={context.registry}>
+      <DiffPanel composerDraftTarget={context.threadRef} workspaceMutationId={null} visible />
+    </RegistryContext.Provider>,
+  );
+  await expect.element(screen.getByText("No net changes in this selection.")).toBeVisible();
+  expect(screen.getByRole("combobox", { name: /Change comparison target/ }).query()).toBeNull();
+});
