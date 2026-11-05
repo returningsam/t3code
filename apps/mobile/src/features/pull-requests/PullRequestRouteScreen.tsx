@@ -425,6 +425,13 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
     permissions.canEditMaintainerEdits,
   );
   const showsDeleteBranch = pr !== null && canPerformPullRequestAction(pr, "delete-branch");
+  const stateAction = action.available("close")
+    ? "close"
+    : action.available("reopen")
+      ? "reopen"
+      : null;
+  const runStateAction = () =>
+    stateAction === "close" ? action.confirmClose() : void action.perform("reopen");
   const confirmDeleteBranch = () =>
     pr &&
     action.confirm(
@@ -559,6 +566,17 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
                     },
                   ]
                 : []),
+              ...(stateAction
+                ? [
+                    {
+                      accessibilityLabel: pullRequestActionLabel(stateAction, terminology),
+                      icon: PR_ACTION_ICONS[stateAction],
+                      destructive: stateAction === "close",
+                      overflowOnly: true,
+                      onPress: runStateAction,
+                    },
+                  ]
+                : []),
               ...(showsDeleteBranch
                 ? [
                     {
@@ -648,6 +666,15 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
                 onPress={() => sharePullRequestLink(identity)}
               >
                 <Toolbar.Label>Share…</Toolbar.Label>
+              </Toolbar.MenuAction>
+            ) : null}
+            {stateAction ? (
+              <Toolbar.MenuAction
+                icon={PR_ACTION_ICONS[stateAction]}
+                destructive={stateAction === "close"}
+                onPress={runStateAction}
+              >
+                <Toolbar.Label>{pullRequestActionLabel(stateAction, terminology)}</Toolbar.Label>
               </Toolbar.MenuAction>
             ) : null}
             {showsDeleteBranch ? (
