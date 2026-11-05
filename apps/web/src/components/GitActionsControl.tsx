@@ -52,6 +52,7 @@ import {
   type GitQuickAction,
   type DefaultBranchConfirmableAction,
   requiresDefaultBranchConfirmation,
+  resolveChangesTotals,
   resolveDefaultBranchActionDialogCopy,
   resolveFeatureBranchUnavailableReason,
   resolveGitActionProgressPresentation,
@@ -1067,7 +1068,10 @@ export default function GitActionsControl({
   const hideInitializeGit = !isRepo && gitStatus?.hasNestedRepositories === true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const gitStatusForActions = gitStatus;
-  const changesTotals = gitStatusForActions?.branchChanges ?? gitStatusForActions?.workingTree;
+  const changesTotals = resolveChangesTotals(gitStatusForActions) ?? {
+    insertions: 0,
+    deletions: 0,
+  };
   // A folder of repositories names its one changed repository on the Changes row, or lists
   // several under it.
   const nestedRepositoryChanges = isRepo ? undefined : gitStatus?.nestedRepositoryChanges;
@@ -1145,8 +1149,8 @@ export default function GitActionsControl({
     gitActionProgress === null &&
     !gitStatusError &&
     quickAction.disabled &&
-    !changesTotals?.insertions &&
-    !changesTotals?.deletions;
+    !changesTotals.insertions &&
+    !changesTotals.deletions;
   const pendingDefaultBranchActionCopy = pendingDefaultBranchAction
     ? resolveDefaultBranchActionDialogCopy({
         action: pendingDefaultBranchAction.action,
@@ -1681,10 +1685,7 @@ export default function GitActionsControl({
                 <ChangeTotals {...soleRepository.totals} />
               ) : null
             ) : isRepo || gitStatus?.branchChanges ? (
-              <ChangeTotals
-                insertions={changesTotals?.insertions ?? 0}
-                deletions={changesTotals?.deletions ?? 0}
-              />
+              <ChangeTotals {...changesTotals} />
             ) : null}
           </ThreadDetailsControl>
           {nestedRows ? (
