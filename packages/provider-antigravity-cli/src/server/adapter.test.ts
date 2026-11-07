@@ -120,7 +120,7 @@ const makeFakeAgy = (transcript: string, options: FakeAgyOptions = {}) =>
     let release: Effect.Effect<void> = Effect.void;
     const spawner = ChildProcessSpawner.make((command) =>
       Effect.gen(function* () {
-        const args = ChildProcess.isStandardCommand(command) ? command.args : [];
+        const args = ChildProcess.isStandardCommand(command) ? command.args.map(String) : [];
         spawns.push(args);
         const received: Array<string> = [];
         stdin.push(received);
