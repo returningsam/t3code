@@ -53,6 +53,7 @@ import {
   resolveAutoFeatureBranchName,
   sanitizeBranchFragment,
   sanitizeFeatureBranchName,
+  WORKTREE_BRANCH_PREFIX,
 } from "@t3tools/shared/git";
 import { isSshRemoteUrl } from "@t3tools/shared/sourceControl";
 import {
@@ -2073,7 +2074,11 @@ export const make = Effect.gen(function* () {
       const upstreamBranch = extractBranchNameFromRemoteRef(upstreamRef, {
         remoteName: headContext.remoteName,
       });
-      if (upstreamBranch.length > 0 && upstreamBranch !== branch) {
+      if (
+        upstreamBranch.length > 0 &&
+        upstreamBranch !== branch &&
+        branch !== `${WORKTREE_BRANCH_PREFIX}/${upstreamBranch}`
+      ) {
         return { baseBranch: upstreamBranch, baseRef: upstreamBranch };
       }
     }

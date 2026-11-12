@@ -3662,6 +3662,45 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       }),
   );
 
+  it.effect("commit_push_pr opens a wt layout branch's PR into the default branch", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      yield* runGit(repoDir, ["checkout", "-b", "wt/feature"]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "wt/feature:feature"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "change.txt"), "change\n");
+
+      const { manager, providerCalls } = yield* makeManager({
+        providerScenario: {
+          defaultBranch: "main",
+          prListSequence: [
+            [],
+            [
+              {
+                number: 507,
+                title: "Feature",
+                url: "https://github.com/pingdotgg/codething-mvp/pull/507",
+                baseRefName: "main",
+                headRefName: "feature",
+              },
+            ],
+          ],
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push_pr",
+      });
+
+      expect(result.pr.status).toBe("created");
+      expect(created(providerCalls).map((call) => call.baseRefName)).toEqual(["main"]);
+    }),
+  );
+
   it.effect("create_pr reports a created PR when the lookup after creation fails", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
