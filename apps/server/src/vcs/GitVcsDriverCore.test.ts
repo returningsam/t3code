@@ -5733,7 +5733,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("adds wt/ only to generated names that wt/ can hold", () =>
+    it.effect("adds wt/ to generated names only where main/ can track them", () =>
       Effect.gen(function* () {
         const pathService = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -5743,15 +5743,23 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* fileSystem.makeDirectory(cwd);
         const { initialBranch } = yield* initRepoWithCommit(cwd);
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        const rename = (oldBranch: string, newBranch: string, generated: boolean) =>
+        const rename = (repo: string, oldBranch: string, newBranch: string, generated: boolean) =>
           driver
-            .renameBranch({ cwd, oldBranch, newBranch, generated })
+            .renameBranch({ cwd: repo, oldBranch, newBranch, generated })
             .pipe(Effect.map((renamed) => renamed.branch));
 
-        assert.equal(yield* rename(initialBranch, "user-picked", false), "user-picked");
-        assert.equal(yield* rename("user-picked", "deadbeef", true), "deadbeef");
+        assert.equal(yield* rename(cwd, initialBranch, "user-picked", false), "user-picked");
+        assert.equal(yield* rename(cwd, "user-picked", "deadbeef", true), "deadbeef");
+        assert.equal(yield* rename(cwd, "deadbeef", "wt/fix-ui", true), "wt/fix-ui");
+        yield* git(cwd, ["branch", "fix-api"]);
+        assert.equal(yield* rename(cwd, "wt/fix-ui", "fix-api", true), "wt/fix-api-1");
+        assert.equal(yield* rename(cwd, "wt/fix-api-1", "plain", false), "plain");
         yield* git(cwd, ["branch", "wt"]);
-        assert.equal(yield* rename("deadbeef", "fix-login", true), "fix-login");
+        assert.equal(yield* rename(cwd, "plain", "fix-login", true), "fix-login");
+
+        const plainRepo = yield* makeTmpDir();
+        const plain = yield* initRepoWithCommit(plainRepo);
+        assert.equal(yield* rename(plainRepo, plain.initialBranch, "fix-login", true), "fix-login");
       }),
     );
 

@@ -1378,6 +1378,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       blockedByParent = yield* branchExists(cwd, segments.slice(0, index).join("/"));
     }
     const desiredBranch = blockedByParent ? segments.join("-") : requestedBranch;
+    const wtPrefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    // linkWtTrackingBranch skips an existing <branch>, so it has to be free too.
+    const needsFreeTrackingBranch =
+      desiredBranch.startsWith(wtPrefix) && (yield* resolveWtLayoutContainer(cwd)) !== null;
     // A branch nested under the name (`t3-fix/child`) blocks it as surely as one with the name.
     const isBranchNameTaken = (name: string) =>
       Effect.zipWith(
@@ -1389,6 +1393,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           true,
         ),
         (exists, nested) => exists || nested.trim().length > 0,
+      ).pipe(
+        Effect.filterOrElse(
+          (taken) => taken || !needsFreeTrackingBranch,
+          () => branchExists(cwd, name.slice(wtPrefix.length)),
+        ),
       );
 
     const isDesiredTaken = yield* isBranchNameTaken(desiredBranch);
@@ -1457,7 +1466,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     const prefixed = `${WORKTREE_BRANCH_PREFIX}/${branch}`;
     if (
       branch.startsWith(`${WORKTREE_BRANCH_PREFIX}/`) ||
-      // wt/<8 hex> would read as a temporary branch.
       isTemporaryWorktreeBranch(prefixed) ||
       (yield* resolveWtLayoutContainer(cwd)) === null ||
       // A `wt` branch blocks every wt/ ref.
