@@ -495,6 +495,7 @@ const make = Effect.gen(function* () {
                 cwd: worktreeCwd,
                 oldBranch,
                 newBranch,
+                generated: true,
                 ...(exactName ? { exactName: true } : {}),
               })
               .pipe(

@@ -5710,11 +5710,13 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         // Temporary branches get no tracking branch until they're renamed.
         assert.equal(yield* git(cwd, ["branch", "--list", "0a1b2c3d"]), "");
 
-        yield* driver.renameBranch({
+        const renamed = yield* driver.renameBranch({
           cwd: worktreePath,
           oldBranch: "wt/0a1b2c3d",
-          newBranch: "wt/fix-login",
+          newBranch: "fix-login",
+          generated: true,
         });
+        assert.equal(renamed.branch, "wt/fix-login");
         assert.equal(
           yield* git(cwd, ["rev-parse", "--abbrev-ref", "fix-login@{upstream}"]),
           "wt/fix-login",
@@ -5728,6 +5730,28 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* git(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
           "origin/fix-login",
         );
+      }),
+    );
+
+    it.effect("adds wt/ only to generated names that wt/ can hold", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        yield* writeTextFile(container, ".wt", "[wt]\n\tname = demo\n");
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const rename = (oldBranch: string, newBranch: string, generated: boolean) =>
+          driver
+            .renameBranch({ cwd, oldBranch, newBranch, generated })
+            .pipe(Effect.map((renamed) => renamed.branch));
+
+        assert.equal(yield* rename(initialBranch, "user-picked", false), "user-picked");
+        assert.equal(yield* rename("user-picked", "deadbeef", true), "deadbeef");
+        yield* git(cwd, ["branch", "wt"]);
+        assert.equal(yield* rename("deadbeef", "fix-login", true), "fix-login");
       }),
     );
 

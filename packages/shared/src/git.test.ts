@@ -316,6 +316,8 @@ describe("formatGeneratedBranchName", () => {
     [" Team / Jules.lock/", "Team/Jules-lock/add-search"],
     ["-team//feature@{new}", "team/feature-new/add-search"],
     [" /?. / ", "add-search"],
+    ["t3", "add-search"],
+    ["T3Code/team/t3", "team/add-search"],
   ])("normalizes invalid static prefix %s", (prefix, expected) => {
     expect(
       formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),

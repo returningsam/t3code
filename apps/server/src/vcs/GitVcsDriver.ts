@@ -192,6 +192,8 @@ export interface GitRangeContext {
 
 export interface GitRenameBranchInput {
   exactName?: boolean;
+  /** T3 generated the name, so the wt layout adds its wt/ prefix. */
+  generated?: boolean;
   cwd: string;
   oldBranch: string;
   newBranch: string;

@@ -49,7 +49,7 @@ export function formatGeneratedBranchName(raw: string, naming?: BranchNamingOpti
         .replace(/-+/g, "-")
         .replace(/^-+|-+$/g, ""),
     )
-    .filter(Boolean)
+    .filter((part) => part && !/^t3(code)?$/i.test(part))
     .join("/");
   return prefix ? `${prefix}/${branch}` : branch;
 }

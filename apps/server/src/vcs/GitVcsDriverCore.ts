@@ -1449,6 +1449,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     ]);
   });
 
+  // In the wt layout, a name T3 generated gets wt/ so linkWtTrackingBranch tracks it from main/.
+  const prefixGeneratedWtBranch = Effect.fn("prefixGeneratedWtBranch")(function* (
+    cwd: string,
+    branch: string,
+  ) {
+    const prefixed = `${WORKTREE_BRANCH_PREFIX}/${branch}`;
+    if (
+      branch.startsWith(`${WORKTREE_BRANCH_PREFIX}/`) ||
+      // wt/<8 hex> would read as a temporary branch.
+      isTemporaryWorktreeBranch(prefixed) ||
+      (yield* resolveWtLayoutContainer(cwd)) === null ||
+      // A `wt` branch blocks every wt/ ref.
+      (yield* branchExists(cwd, WORKTREE_BRANCH_PREFIX))
+    ) {
+      return branch;
+    }
+    return prefixed;
+  });
+
   // `--abbrev-ref` prints `remotes/origin/<name>` when a local `origin/<name>` branch exists.
   const readCurrentUpstreamRef = Effect.fn("readCurrentUpstreamRef")(function* (cwd: string) {
     const upstreamRef = yield* runGitStdout(
@@ -5554,12 +5573,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const renameBranch: GitVcsDriver.GitVcsDriver["Service"]["renameBranch"] = Effect.fn(
     "renameBranch",
   )(function* (input) {
-    if (input.oldBranch === input.newBranch) {
-      return { branch: input.newBranch };
+    const newBranch = input.generated
+      ? yield* prefixGeneratedWtBranch(input.cwd, input.newBranch)
+      : input.newBranch;
+    if (input.oldBranch === newBranch) {
+      return { branch: newBranch };
     }
     const targetBranch = input.exactName
-      ? input.newBranch
-      : yield* resolveAvailableBranchName(input.cwd, input.newBranch);
+      ? newBranch
+      : yield* resolveAvailableBranchName(input.cwd, newBranch);
 
     yield* executeGit(
       "GitVcsDriver.renameBranch",

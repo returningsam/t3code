@@ -66,10 +66,11 @@ A project on several machines must have every machine connected to pin or archiv
 
 In **Settings → Worktrees → Worktree branch naming**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
-for the complete name. The static prefix defaults to `t3/`; a trailing slash is
+for the complete name. The static prefix is empty by default; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
-are replaced with hyphens. Custom instructions are appended to
-the naming prompt and can specify issue IDs, namespaces, and casing.
+are replaced with hyphens, and a `t3` or `t3code` segment is dropped. Custom
+instructions are appended to the naming prompt and can specify issue IDs,
+namespaces, and casing.
 
 These settings apply to automatically named new worktree branches. Select a project
 to override its environment defaults. Worktree directories keep their original names.
