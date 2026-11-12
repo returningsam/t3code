@@ -265,7 +265,9 @@ const makeHarness = (options: HarnessOptions = {}) => {
       workingTree: { files: [], insertions: 0, deletions: 0 },
     }),
   );
-  const isRepository = vi.fn(() => Effect.succeed(options.notARepo !== true));
+  const repositoryRoot = vi.fn(() =>
+    Effect.succeed(options.notARepo === true ? null : workspaceRoot),
+  );
   const refreshStatus = vi.fn((_: string) => Effect.die("refreshStatus stub"));
   const runForThread = vi.fn((input: { readonly worktreePath: string }) => {
     switch (options.setupScript ?? "started") {
@@ -319,7 +321,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           listRefs,
           listLocalBranchNames,
-          isRepository,
+          repositoryRoot,
           localStatus,
           fetchWorktreeBaseCommit,
           createWorktree,

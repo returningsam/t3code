@@ -1,5 +1,3 @@
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's FileSystem has no lstat.
-import * as NodeFSP from "node:fs/promises";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
@@ -3838,8 +3836,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   // When a changed path's file is gone, as after a deletion, the nearest folder above it that
   // remains dates the change. lstat keeps a symlink from leading outside the repository.
   const readNestedChangedAt = (cwd: string, relativePath: string): Effect.Effect<number> =>
-    Effect.tryPromise(() => NodeFSP.lstat(path.join(cwd, relativePath))).pipe(
-      Effect.map((info) => info.mtimeMs),
+    fileSystem.lstat(path.join(cwd, relativePath)).pipe(
+      Effect.map((info) => Option.getOrUndefined(info.mtime)?.getTime() ?? 0),
       Effect.catch(() =>
         relativePath === "."
           ? Effect.succeed(0)

@@ -3629,6 +3629,19 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           assert.include(diff, "+++ b/worktrees/wt-a/notes.txt");
           assert.notInclude(diff, "loose.txt");
 
+          const listing = yield* driver.getReviewDiffPreview({
+            cwd: root,
+            metadataOnly: true,
+            sourceKind: "working-tree",
+          });
+          assert.deepStrictEqual(
+            listing.sources.map((source) => source.kind),
+            ["working-tree"],
+          );
+          assert.deepStrictEqual(sourceOf(listing, "working-tree").files, expected);
+          assert.strictEqual(sourceOf(listing, "working-tree").diff, "");
+          assert.isTrue(sourceOf(listing, "working-tree").patchesDeferred);
+
           const scoped = yield* driver.getReviewDiffPreview({
             cwd: root,
             file: {

@@ -17,8 +17,8 @@ export const chatGitStatusAtom = Atom.family((status: ReturnType<typeof vcsEnvir
   Atom.map(status, (result) => {
     const data = AsyncResult.getOrElse(result, () => null);
     if (data === null) return null;
-    const { isRepo, refName, hasWorkingTreeChanges, pr } = data;
-    return { isRepo, refName, hasWorkingTreeChanges, pr };
+    const { isRepo, refName, hasWorkingTreeChanges, pr, hasNestedRepositories } = data;
+    return { isRepo, refName, hasWorkingTreeChanges, pr, hasNestedRepositories };
   }).pipe(Atom.withEquality(Equal.equals)),
 );
 export const NO_CHAT_GIT_STATUS_ATOM: ReturnType<typeof chatGitStatusAtom> = Atom.make(null);
