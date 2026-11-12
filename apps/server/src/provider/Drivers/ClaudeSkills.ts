@@ -436,6 +436,9 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
 const SettingsEnv = Schema.Struct({
   ANTHROPIC_BASE_URL: Schema.optional(Schema.String),
   CLAUDE_CODE_ENTRYPOINT: Schema.optional(Schema.String),
+  // Unquoted JSON values must not fail the decode and drop ANTHROPIC_BASE_URL with them.
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: Schema.optional(Schema.Unknown),
+  CLAUDE_CODE_GATEWAY_MODEL_DISCOVERY_TIMEOUT_MS: Schema.optional(Schema.Unknown),
 });
 const decodeSettingsEnv = Schema.decodeUnknownEffect(
   fromLenientJson(Schema.Struct({ env: Schema.optional(SettingsEnv) })),
@@ -468,6 +471,17 @@ export const readClaudeSettingsEnv = Effect.fn("readClaudeSettingsEnv")(function
   }
   return settingsEnv;
 });
+
+/** The host of an `ANTHROPIC_BASE_URL` that is not Anthropic's own API. */
+export function customClaudeApiEndpointHost(baseUrl: string | undefined): string | undefined {
+  const endpoint = URL.parse(baseUrl?.trim() ?? "");
+  return endpoint !== null &&
+    (endpoint.protocol === "http:" || endpoint.protocol === "https:") &&
+    endpoint.hostname !== "" &&
+    endpoint.hostname !== "api.anthropic.com"
+    ? endpoint.hostname
+    : undefined;
+}
 
 // Claude's --add-dir is repeatable and variadic; parseCliArgs keeps only one value.
 export function claudeLaunchArgDirectories(launchArgs?: string): ReadonlyArray<string> {

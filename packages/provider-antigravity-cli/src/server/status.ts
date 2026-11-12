@@ -15,8 +15,9 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import {
   buildServerProvider,
   isCommandMissingCause,
-  parseGenericCliVersion,
+  parseCliVersionResult,
   providerModelsFromSettings,
+  providerProbeEnvironment,
   spawnAndCollect,
   type ProviderProbeResult,
   type ServerProviderDraft,
@@ -118,8 +119,9 @@ export const checkAntigravityCliStatus = Effect.fn("checkAntigravityCliStatus")(
     });
   }
   const command = settings.binaryPath;
+  const probeEnvironment = providerProbeEnvironment(environment);
 
-  const versionResult = yield* runAgy(command, ["--version"], environment).pipe(
+  const versionResult = yield* runAgy(command, ["--version"], probeEnvironment).pipe(
     Effect.timeoutOption(VERSION_TIMEOUT_MS),
     Effect.result,
   );
@@ -135,9 +137,9 @@ export const checkAntigravityCliStatus = Effect.fn("checkAntigravityCliStatus")(
         : "agy is installed but did not report its version.",
     });
   }
-  const version = parseGenericCliVersion(versionResult.success.value.stdout);
+  const version = parseCliVersionResult(versionResult.success.value);
 
-  const modelsResult = yield* runAgy(command, ["models"], environment).pipe(
+  const modelsResult = yield* runAgy(command, ["models"], probeEnvironment).pipe(
     Effect.timeoutOption(MODELS_TIMEOUT_MS),
     Effect.result,
   );
