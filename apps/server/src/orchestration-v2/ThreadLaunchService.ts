@@ -54,6 +54,8 @@ import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { DispatchModeLimit } from "./DispatchModeLimit.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
+const BRANCH_NAMING_TIMEOUT = "30 seconds";
+
 export type ThreadLaunchWorkspaceStrategy =
   | { readonly type: "root"; readonly branch?: string | undefined }
   | {
@@ -376,6 +378,8 @@ const make = Effect.gen(function* () {
           initialMessage !== undefined &&
           (requestedBranch === undefined || isTemporaryWorktreeBranch(requestedBranch))
             ? yield* generateBranchNameFor(initialMessage).pipe(
+                // Checkout waits on this, so a stalled model falls back instead of holding setup.
+                Effect.timeout(BRANCH_NAMING_TIMEOUT),
                 Effect.catchCause((cause) =>
                   Effect.logWarning("Thread worktree branch naming failed", {
                     commandId: input.commandId,

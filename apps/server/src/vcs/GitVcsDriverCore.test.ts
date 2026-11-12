@@ -5825,6 +5825,12 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           "wt/fix-race-1",
         ]);
         for (const worktree of raced) assert.equal(worktree.path, folder(worktree.refName));
+
+        // A failure other than a lost race is not retried under the next name.
+        yield* writeTextFile(cwd, ".git/hooks/post-checkout", "#!/bin/sh\nexit 2\n");
+        yield* fileSystem.chmod(pathService.join(cwd, ".git/hooks/post-checkout"), 0o755);
+        yield* Effect.flip(create("fix-hook"));
+        assert.equal(yield* git(cwd, ["branch", "--list", "wt/fix-hook-1"]), "");
       }),
     );
 

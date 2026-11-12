@@ -2308,18 +2308,23 @@ it.effect("cancels tracked setup while the branch is being named", () =>
 );
 
 it.effect.each([
-  { name: "names a new worktree's branch before creating it", requested: undefined, named: true },
-  { name: "names mobile's temporary branch the same way", requested: "wt/0a1b2c3d", named: true },
-  { name: "keeps a temporary branch when naming fails", requested: undefined, named: false },
-])("$name", (testCase) =>
+  { name: "names a new worktree's branch before creating it", requested: undefined, naming: "ok" },
+  { name: "names mobile's temporary branch the same way", requested: "wt/0a1b2c3d", naming: "ok" },
+  { name: "keeps a temporary branch when naming fails", requested: undefined, naming: "fails" },
+  { name: "keeps a temporary branch when naming stalls", requested: undefined, naming: "stalls" },
+  { name: "keeps a requested branch without naming it", requested: "fix/login", naming: "skipped" },
+] as const)("$name", (testCase) =>
   Effect.gen(function* () {
+    const named = testCase.naming === "ok";
     const harness = makeHarness({
       generateBranchName: () =>
-        testCase.named
-          ? Effect.succeed({ branch: "wt/fix/i12-sidebar-counts" })
-          : Effect.fail(
+        testCase.naming === "fails"
+          ? Effect.fail(
               new TextGenerationError({ operation: "generateBranchName", detail: "offline" }),
-            ),
+            )
+          : testCase.naming === "stalls"
+            ? Effect.never
+            : Effect.succeed({ branch: "wt/fix/i12-sidebar-counts" }),
       createWorktree: (input, options) =>
         Effect.succeed({
           worktree: {
@@ -2342,18 +2347,37 @@ it.effect.each([
           },
         }),
       );
+      if (testCase.naming === "stalls") {
+        const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+        yield* tracker.stream(launched.threadId).pipe(
+          Stream.filter(
+            (snapshot) =>
+              snapshot?.stages.some(
+                (stage) => stage.id === "checkout" && stage.status === "running",
+              ) === true,
+          ),
+          Stream.runHead,
+        );
+        yield* TestClock.adjust(Duration.seconds(30));
+      }
       const projection = yield* preparationSettled(launched.threadId);
-      assert.equal(harness.generateBranchName.mock.calls[0]?.[0].cwd, "/repo");
+      if (testCase.naming === "skipped") {
+        assert.equal(harness.generateBranchName.mock.calls.length, 0);
+      } else {
+        assert.equal(harness.generateBranchName.mock.calls[0]?.[0].cwd, "/repo");
+      }
       const [create, options] = harness.createWorktree.mock.calls[0]!;
-      assert.equal(options?.generatedBranchName, testCase.named ? true : undefined);
-      if (testCase.named) {
+      assert.equal(options?.generatedBranchName, named ? true : undefined);
+      if (named) {
         assert.equal(create.newRefName, "wt/fix/i12-sidebar-counts");
+      } else if (testCase.naming === "skipped") {
+        assert.equal(create.newRefName, "fix/login");
       } else {
         assert.match(create.newRefName ?? "", /^wt\/[0-9a-f]{8}$/);
       }
       assert.equal(
         projection.thread.branch,
-        testCase.named ? "wt/fix/i12-sidebar-counts-1" : create.newRefName,
+        named ? "wt/fix/i12-sidebar-counts-1" : create.newRefName,
       );
     }).pipe(Effect.provide(harness.layer));
   }),

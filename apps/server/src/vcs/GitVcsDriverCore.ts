@@ -73,6 +73,8 @@ const branchBaseConfigKey = (branch: string) => `branch.${branch}.t3-merge-base`
 const legacyBranchBaseConfigKey = (branch: string) => `branch.${branch}.gh-merge-base`;
 const gitProcesses = Semaphore.makeUnsafe(8);
 const WORKTREE_REMOVE_TIMEOUT_MS = Duration.toMillis(Duration.minutes(5));
+const MAX_GENERATED_BRANCH_ATTEMPTS = 10;
+const CREATE_WORKTREE_BRANCH_OPERATION = "GitVcsDriver.createWorktree.createBranch";
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
@@ -5000,7 +5002,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (newRefName) {
       // Kept apart from the checkout so the shared-config lock only covers the tracking write.
       yield* createBranchAt(
-        "GitVcsDriver.createWorktree.createBranch",
+        CREATE_WORKTREE_BRANCH_OPERATION,
         { cwd: input.cwd, branch: newRefName, startPoint: input.refName },
         "git worktree add failed",
       );
@@ -5183,8 +5185,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             Effect.orElseSucceed(() => false),
           )
         : Effect.succeed(false);
-    // A concurrent launch can claim the same name between the check and `git branch`; its branch
-    // then exists, so the next pass moves on to a free name.
+    // A concurrent launch can claim the same branch or folder between the check and the add, so
+    // only those failures move on to the next free name.
     for (let attempt = 1; ; attempt += 1) {
       const newRefName = yield* resolveAvailableBranchName(
         input.cwd,
@@ -5193,7 +5195,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       );
       const created = yield* Effect.result(createWorktree({ ...input, newRefName }, options));
       if (Result.isSuccess(created)) return created.success;
-      if (attempt === 3 || !(yield* branchExists(input.cwd, newRefName))) {
+      const { operation, reason } = created.failure;
+      // A failed `git branch` (taken name or ref lock) leaves no branch of its own behind.
+      const lostRace =
+        reason === "path_already_exists" ||
+        (operation === CREATE_WORKTREE_BRANCH_OPERATION &&
+          (yield* branchExists(input.cwd, newRefName).pipe(Effect.orElseSucceed(() => false))));
+      if (!lostRace || attempt === MAX_GENERATED_BRANCH_ATTEMPTS) {
         return yield* created.failure;
       }
     }

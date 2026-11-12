@@ -37,19 +37,25 @@ export function sanitizeBranchFragment(raw: string): string {
   return branchFragment.length > 0 ? branchFragment : "update";
 }
 
-// Changes only what `git check-ref-format --branch` rejects, so a custom name keeps its shape.
+const MAX_CUSTOM_BRANCH_LENGTH = 100;
+
+// Keeps a custom name's shape: replaces what `git check-ref-format --branch` rejects, and caps
+// the length because the worktree folder is named after the whole branch.
 function repairBranchName(raw: string): string {
-  const repaired = raw
+  const replaced = raw
     .trim()
     .replace(/[\s\p{Cc}~^:?*[\\]+/gu, "-")
     .replaceAll("@{", "-")
-    .replace(/\.{2,}/g, ".")
-    .replace(/^[-./]+|[./]+$/g, "")
+    .replace(/\.{2,}/g, ".");
+  const repaired = Array.from(replaced)
+    .slice(0, MAX_CUSTOM_BRANCH_LENGTH)
+    .join("")
+    .replace(/^[-./]+|[-./]+$/g, "")
     .split("/")
     .map((part) => part.replace(/^\.+/, "").replace(/\.lock$/, "-lock"))
     .filter(Boolean)
     .join("/");
-  return repaired.length > 0 ? repaired : sanitizeBranchFragment(raw);
+  return repaired.length > 0 && repaired !== "HEAD" ? repaired : sanitizeBranchFragment(raw);
 }
 
 export function formatGeneratedBranchName(raw: string, naming?: BranchNamingOptions): string {

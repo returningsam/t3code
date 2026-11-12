@@ -325,11 +325,14 @@ describe("formatGeneratedBranchName", () => {
   });
   it.each([
     ["wt/fix/i12-Sidebar-Counts", "wt/fix/i12-Sidebar-Counts"],
-    ["wt/fix/I12 Sidebar: Counts?", "wt/fix/I12-Sidebar-Counts-"],
+    ["wt/fix/I12 Sidebar: Counts?", "wt/fix/I12-Sidebar-Counts"],
     [" -wt//fix/login..page.lock/ ", "wt/fix/login.page-lock"],
     [".hidden/v2@{now}~1.", "hidden/v2-now}-1"],
     ["???", "update"],
-  ])("fixes only what git rejects in custom name %s", (raw, expected) => {
+    ["HEAD", "head"],
+    [`wt/fix/${"a".repeat(120)}`, `wt/fix/${"a".repeat(93)}`],
+    [`wt/fix/${"a".repeat(92)}/.lock`, `wt/fix/${"a".repeat(92)}`],
+  ])("keeps the shape of custom name %s while making it valid", (raw, expected) => {
     expect(formatGeneratedBranchName(raw, { mode: "custom", prefix: "wt", instructions: "" })).toBe(
       expected,
     );
