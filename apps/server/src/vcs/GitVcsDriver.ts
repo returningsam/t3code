@@ -128,7 +128,10 @@ export interface ExecuteGitProgress {
 
 export interface CreateWorktreeProgress {
   /** Git refuses existing paths; claimed paths belong to this call and can be removed on cancel. */
-  readonly onWorktreeClaimed?: (path: string) => Effect.Effect<void, never>;
+  readonly onWorktreeClaimed?: (
+    path: string,
+    createdBranch: string | undefined,
+  ) => Effect.Effect<void, never>;
   readonly onCheckoutProgress?: (input: {
     percent: number;
     completed: number;
@@ -150,6 +153,11 @@ export interface CreateWorktreeOptions {
   /** Null or omitted defers to the checkout's t3.json. */
   readonly submodules?: WorktreeSubmodules | null;
   readonly worktreesDirectory?: string;
+  /**
+   * T3 generated `newRefName`: the wt layout gives it the wt/ prefix, and a name whose branch or
+   * folder is taken moves to the next free one.
+   */
+  readonly generatedBranchName?: boolean;
 }
 
 export interface GitCommitProgress {
@@ -192,8 +200,6 @@ export interface GitRangeContext {
 
 export interface GitRenameBranchInput {
   exactName?: boolean;
-  /** T3 generated the name, so the wt layout adds its wt/ prefix. */
-  generated?: boolean;
   cwd: string;
   oldBranch: string;
   newBranch: string;

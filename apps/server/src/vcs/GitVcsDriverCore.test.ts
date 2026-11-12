@@ -5710,13 +5710,11 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         // Temporary branches get no tracking branch until they're renamed.
         assert.equal(yield* git(cwd, ["branch", "--list", "0a1b2c3d"]), "");
 
-        const renamed = yield* driver.renameBranch({
+        yield* driver.renameBranch({
           cwd: worktreePath,
           oldBranch: "wt/0a1b2c3d",
-          newBranch: "fix-login",
-          generated: true,
+          newBranch: "wt/fix-login",
         });
-        assert.equal(renamed.branch, "wt/fix-login");
         assert.equal(
           yield* git(cwd, ["rev-parse", "--abbrev-ref", "fix-login@{upstream}"]),
           "wt/fix-login",
@@ -5743,23 +5741,90 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* fileSystem.makeDirectory(cwd);
         const { initialBranch } = yield* initRepoWithCommit(cwd);
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        const rename = (repo: string, oldBranch: string, newBranch: string, generated: boolean) =>
+        const create = (repo: string, newRefName: string, generatedBranchName: boolean) =>
           driver
-            .renameBranch({ cwd: repo, oldBranch, newBranch, generated })
-            .pipe(Effect.map((renamed) => renamed.branch));
+            .createWorktree(
+              { cwd: repo, path: null, refName: initialBranch, newRefName },
+              { generatedBranchName },
+            )
+            .pipe(Effect.map(({ worktree }) => worktree.refName));
 
-        assert.equal(yield* rename(cwd, initialBranch, "user-picked", false), "user-picked");
-        assert.equal(yield* rename(cwd, "user-picked", "deadbeef", true), "deadbeef");
-        assert.equal(yield* rename(cwd, "deadbeef", "wt/fix-ui", true), "wt/fix-ui");
-        yield* git(cwd, ["branch", "fix-api"]);
-        assert.equal(yield* rename(cwd, "wt/fix-ui", "fix-api", true), "wt/fix-api-1");
-        assert.equal(yield* rename(cwd, "wt/fix-api-1", "plain", false), "plain");
-        yield* git(cwd, ["branch", "wt"]);
-        assert.equal(yield* rename(cwd, "plain", "fix-login", true), "fix-login");
+        assert.equal(yield* create(cwd, "user-picked", false), "user-picked");
+        assert.equal(yield* create(cwd, "deadbeef", true), "deadbeef");
+        assert.equal(yield* create(cwd, "wt/fix/i12-ui", true), "wt/fix/i12-ui");
+        assert.equal(yield* create(cwd, "fix-login", true), "wt/fix-login");
+        assert.equal(
+          yield* git(cwd, ["rev-parse", "--abbrev-ref", "fix-login@{upstream}"]),
+          "wt/fix-login",
+        );
+
+        const blocked = pathService.join(yield* fileSystem.realPath(yield* makeTmpDir()), "main");
+        yield* fileSystem.makeDirectory(blocked);
+        yield* writeTextFile(pathService.dirname(blocked), ".wt", "[wt]\n\tname = blocked\n");
+        const blockedRepo = yield* initRepoWithCommit(blocked);
+        yield* git(blocked, ["branch", "wt"]);
+        assert.equal(
+          (yield* driver.createWorktree(
+            { cwd: blocked, path: null, refName: blockedRepo.initialBranch, newRefName: "fix-ui" },
+            { generatedBranchName: true },
+          )).worktree.refName,
+          "fix-ui",
+        );
 
         const plainRepo = yield* makeTmpDir();
         const plain = yield* initRepoWithCommit(plainRepo);
-        assert.equal(yield* rename(plainRepo, plain.initialBranch, "fix-login", true), "fix-login");
+        const created = yield* driver.createWorktree(
+          { cwd: plainRepo, path: null, refName: plain.initialBranch, newRefName: "fix-login" },
+          { generatedBranchName: true },
+        );
+        assert.equal(created.worktree.refName, "fix-login");
+        yield* driver.removeWorktree({ cwd: plainRepo, path: created.worktree.path, force: true });
+      }),
+    );
+
+    it.effect("moves a generated name to the next free one and names the folder after it", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        yield* writeTextFile(container, ".wt", "[wt]\n\tname = demo\n");
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const folder = (branch: string) =>
+          pathService.join(container, "worktrees", branch.replaceAll("/", "-"));
+        const create = (newRefName: string) =>
+          driver
+            .createWorktree(
+              { cwd, path: null, refName: initialBranch, newRefName },
+              { generatedBranchName: true },
+            )
+            .pipe(Effect.map(({ worktree }) => worktree));
+
+        const expectCreated = (newRefName: string, branch: string) =>
+          create(newRefName).pipe(
+            Effect.map((worktree) =>
+              assert.deepEqual(worktree, { refName: branch, path: folder(branch) }),
+            ),
+          );
+        yield* expectCreated("wt/fix/i12-sidebar-counts", "wt/fix/i12-sidebar-counts");
+        yield* expectCreated("wt/fix/i12-sidebar-counts", "wt/fix/i12-sidebar-counts-1");
+        // main/ needs its tracking branch free, and Git refuses a folder that is in use.
+        yield* git(cwd, ["branch", "fix-api"]);
+        yield* expectCreated("fix-api", "wt/fix-api-1");
+        yield* fileSystem.makeDirectory(folder("wt/fix-docs"), { recursive: true });
+        yield* writeTextFile(folder("wt/fix-docs"), "notes.txt", "kept\n");
+        yield* expectCreated("fix-docs", "wt/fix-docs-1");
+
+        const raced = yield* Effect.all([create("fix-race"), create("fix-race")], {
+          concurrency: "unbounded",
+        });
+        assert.deepEqual(raced.map((worktree) => worktree.refName).toSorted(), [
+          "wt/fix-race",
+          "wt/fix-race-1",
+        ]);
+        for (const worktree of raced) assert.equal(worktree.path, folder(worktree.refName));
       }),
     );
 

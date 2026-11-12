@@ -72,9 +72,10 @@ are replaced with hyphens. Custom instructions are appended to
 the naming prompt and can specify issue IDs, namespaces, and casing.
 
 These settings apply to automatically named new worktree branches. Select a project
-to override its environment defaults. Worktree directories keep their original names.
-If generation fails, or a custom name is invalid or already taken, the temporary
-branch name remains.
+to override its environment defaults. Each worktree's folder is named after its branch.
+Characters Git rejects in a custom name are replaced, and a name that is already taken
+gets a numeric suffix such as `-1`. If generation fails, the worktree gets a temporary
+branch name.
 
 ## Scheduled tasks on mobile
 
