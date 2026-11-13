@@ -1410,10 +1410,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       (_, index) => index > 0 && branches.has(segments.slice(0, index).join("/").toLowerCase()),
     );
     const desiredBranch = blockedByParent ? segments.join("-") : requestedBranch;
-    if (!blockedNames.has(desiredBranch.toLowerCase())) return desiredBranch;
+    const wtPrefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    // linkWtTrackingBranch skips an existing <branch>, so it has to be free too.
+    const needsFreeTrackingBranch =
+      desiredBranch.startsWith(wtPrefix) && (yield* resolveWtLayoutContainer(cwd)) !== null;
+    const isBlocked = (name: string) =>
+      blockedNames.has(name.toLowerCase()) ||
+      (needsFreeTrackingBranch && blockedNames.has(name.slice(wtPrefix.length).toLowerCase()));
+    if (!isBlocked(desiredBranch)) return desiredBranch;
     for (let suffix = 1; suffix <= 100; suffix += 1) {
       const candidate = `${desiredBranch}-${suffix}`;
-      if (!blockedNames.has(candidate.toLowerCase())) return candidate;
+      if (!isBlocked(candidate)) return candidate;
     }
 
     return yield* new GitCommandError({
@@ -1459,6 +1466,24 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       trackingBranch,
       branch,
     ]);
+  });
+
+  // In the wt layout, a name T3 generated gets wt/ so linkWtTrackingBranch tracks it from main/.
+  const prefixGeneratedWtBranch = Effect.fn("prefixGeneratedWtBranch")(function* (
+    cwd: string,
+    branch: string,
+  ) {
+    const prefixed = `${WORKTREE_BRANCH_PREFIX}/${branch}`;
+    if (
+      branch.startsWith(`${WORKTREE_BRANCH_PREFIX}/`) ||
+      isTemporaryWorktreeBranch(prefixed) ||
+      (yield* resolveWtLayoutContainer(cwd)) === null ||
+      // A `wt` branch blocks every wt/ ref.
+      (yield* branchExists(cwd, WORKTREE_BRANCH_PREFIX))
+    ) {
+      return branch;
+    }
+    return prefixed;
   });
 
   // `--abbrev-ref` prints `remotes/origin/<name>` when a local `origin/<name>` branch exists.
@@ -5640,12 +5665,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const renameBranch: GitVcsDriver.GitVcsDriver["Service"]["renameBranch"] = Effect.fn(
     "renameBranch",
   )(function* (input) {
-    if (input.oldBranch === input.newBranch) {
-      return { branch: input.newBranch };
+    const newBranch = input.generated
+      ? yield* prefixGeneratedWtBranch(input.cwd, input.newBranch)
+      : input.newBranch;
+    if (input.oldBranch === newBranch) {
+      return { branch: newBranch };
     }
     const targetBranch = input.exactName
-      ? input.newBranch
-      : yield* resolveAvailableBranchName(input.cwd, input.newBranch);
+      ? newBranch
+      : yield* resolveAvailableBranchName(input.cwd, newBranch);
 
     yield* executeGit(
       "GitVcsDriver.renameBranch",

@@ -6009,11 +6009,13 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         // Temporary branches get no tracking branch until they're renamed.
         assert.equal(yield* git(cwd, ["branch", "--list", "0a1b2c3d"]), "");
 
-        yield* driver.renameBranch({
+        const renamed = yield* driver.renameBranch({
           cwd: worktreePath,
           oldBranch: "wt/0a1b2c3d",
-          newBranch: "wt/fix-login",
+          newBranch: "fix-login",
+          generated: true,
         });
+        assert.equal(renamed.branch, "wt/fix-login");
         assert.equal(
           yield* git(cwd, ["rev-parse", "--abbrev-ref", "fix-login@{upstream}"]),
           "wt/fix-login",
@@ -6027,6 +6029,36 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* git(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
           "origin/fix-login",
         );
+      }),
+    );
+
+    it.effect("adds wt/ to generated names only where main/ can track them", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        yield* writeTextFile(container, ".wt", "[wt]\n\tname = demo\n");
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const rename = (repo: string, oldBranch: string, newBranch: string, generated: boolean) =>
+          driver
+            .renameBranch({ cwd: repo, oldBranch, newBranch, generated })
+            .pipe(Effect.map((renamed) => renamed.branch));
+
+        assert.equal(yield* rename(cwd, initialBranch, "user-picked", false), "user-picked");
+        assert.equal(yield* rename(cwd, "user-picked", "deadbeef", true), "deadbeef");
+        assert.equal(yield* rename(cwd, "deadbeef", "wt/fix-ui", true), "wt/fix-ui");
+        yield* git(cwd, ["branch", "fix-api"]);
+        assert.equal(yield* rename(cwd, "wt/fix-ui", "fix-api", true), "wt/fix-api-1");
+        assert.equal(yield* rename(cwd, "wt/fix-api-1", "plain", false), "plain");
+        yield* git(cwd, ["branch", "wt"]);
+        assert.equal(yield* rename(cwd, "plain", "fix-login", true), "fix-login");
+
+        const plainRepo = yield* makeTmpDir();
+        const plain = yield* initRepoWithCommit(plainRepo);
+        assert.equal(yield* rename(plainRepo, plain.initialBranch, "fix-login", true), "fix-login");
       }),
     );
 
