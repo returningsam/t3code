@@ -178,10 +178,10 @@ const make = Effect.gen(function* () {
     const project = yield* loadProject(scope, projection.thread.projectId);
     const projectCwd = project.workspaceRoot;
 
-    const isRepository = yield* gitWorkflow
-      .isRepository(projectCwd)
+    const repositoryRoot = yield* gitWorkflow
+      .repositoryRoot(projectCwd)
       .pipe(asOperationFailed("Unable to read git status"));
-    if (!isRepository) {
+    if (repositoryRoot === null) {
       return yield* failure(
         "invalid_request",
         `Project workspace '${projectCwd}' is not a git repository.`,
