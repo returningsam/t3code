@@ -133,7 +133,6 @@ export class GitWorkflowService extends Context.Service<
     ) => Effect.Effect<VcsSwitchRefResult, GitCommandError>;
     readonly renameBranch: (input: {
       readonly exactName?: boolean;
-      readonly generated?: boolean;
       readonly cwd: string;
       readonly oldBranch: string;
       readonly newBranch: string;
