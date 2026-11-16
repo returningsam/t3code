@@ -30,6 +30,7 @@ import {
   type ReviewDiffPreviewInput,
   type ReviewDiffFileStat,
   type ReviewDiffPreviewSource,
+  type VcsCreateWorktreeInput,
   type VcsRef,
 } from "@t3tools/contracts";
 import {
@@ -71,6 +72,8 @@ const legacyBranchBaseConfigKey = (branch: string) => `branch.${branch}.gh-merge
 const gitProcesses = Semaphore.makeUnsafe(8);
 const backgroundGitProcesses = Semaphore.makeUnsafe(2);
 const WORKTREE_REMOVE_TIMEOUT_MS = Duration.toMillis(Duration.minutes(5));
+const MAX_GENERATED_BRANCH_ATTEMPTS = 10;
+const CREATE_WORKTREE_BRANCH_OPERATION = "GitVcsDriver.createWorktree.createBranch";
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
@@ -1381,6 +1384,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveAvailableBranchName = Effect.fn("resolveAvailableBranchName")(function* (
     cwd: string,
     requestedBranch: string,
+    isFolderTaken: (branch: string) => Effect.Effect<boolean> = () => Effect.succeed(false),
   ) {
     // Exceeding the limit fails the command, so the set is never built from a partial list.
     const { stdout } = yield* executeGit(
@@ -1410,10 +1414,24 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       (_, index) => index > 0 && branches.has(segments.slice(0, index).join("/").toLowerCase()),
     );
     const desiredBranch = blockedByParent ? segments.join("-") : requestedBranch;
-    if (!blockedNames.has(desiredBranch.toLowerCase())) return desiredBranch;
+    const wtPrefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    const wtLayout = (yield* resolveWtLayoutContainer(cwd)) !== null;
+    // linkWtTrackingBranch skips an existing <branch>, so it has to be free too.
+    const needsFreeTrackingBranch = wtLayout && desiredBranch.startsWith(wtPrefix);
+    // wt layout folders replace / with -, so wt/a/b and wt/a-b would share one.
+    const takenFolders = new Set(
+      wtLayout ? [...branches].map((branch) => branch.replaceAll("/", "-")) : [],
+    );
+    const isBlocked = (name: string) =>
+      blockedNames.has(name.toLowerCase()) ||
+      takenFolders.has(name.toLowerCase().replaceAll("/", "-")) ||
+      (needsFreeTrackingBranch && blockedNames.has(name.slice(wtPrefix.length).toLowerCase()));
+    const isTaken = (name: string) =>
+      isBlocked(name) ? Effect.succeed(true) : isFolderTaken(name);
+    if (!(yield* isTaken(desiredBranch))) return desiredBranch;
     for (let suffix = 1; suffix <= 100; suffix += 1) {
       const candidate = `${desiredBranch}-${suffix}`;
-      if (!blockedNames.has(candidate.toLowerCase())) return candidate;
+      if (!(yield* isTaken(candidate))) return candidate;
     }
 
     return yield* new GitCommandError({
@@ -1459,6 +1477,24 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       trackingBranch,
       branch,
     ]);
+  });
+
+  // In the wt layout, a name T3 generated gets wt/ so linkWtTrackingBranch tracks it from main/.
+  const prefixGeneratedWtBranch = Effect.fn("prefixGeneratedWtBranch")(function* (
+    cwd: string,
+    branch: string,
+  ) {
+    const prefixed = `${WORKTREE_BRANCH_PREFIX}/${branch}`;
+    if (
+      branch.startsWith(`${WORKTREE_BRANCH_PREFIX}/`) ||
+      isTemporaryWorktreeBranch(prefixed) ||
+      (yield* resolveWtLayoutContainer(cwd)) === null ||
+      // A `wt` branch blocks every wt/ ref.
+      (yield* branchExists(cwd, WORKTREE_BRANCH_PREFIX))
+    ) {
+      return branch;
+    }
+    return prefixed;
   });
 
   // `--abbrev-ref` prints `remotes/origin/<name>` when a local `origin/<name>` branch exists.
@@ -4977,52 +5013,63 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const defaultWorktreePath = Effect.fn("defaultWorktreePath")(function* (
+    cwd: string,
+    branch: string,
+    worktreesDirectory: string | undefined,
+  ) {
+    const wtLayoutContainer = yield* resolveWtLayoutContainer(cwd);
+    if (wtLayoutContainer) {
+      // The wt layout names each worktree after its whole branch, so this skips the shortening.
+      return path.join(wtLayoutContainer, "worktrees", branch.replace(/\//g, "-"));
+    }
+    const parentDir = resolveWorktreesDirectory(
+      worktreesDirectory ?? "",
+      worktreesDir,
+      path,
+      yield* HostProcess.HomeDirectory,
+    );
+    if (parentDir === null) {
+      return yield* new GitCommandError({
+        operation: "GitVcsDriver.createWorktree",
+        command: "git worktree add",
+        cwd,
+        detail: `The worktree location "${worktreesDirectory}" must be an absolute folder on this machine, not a drive root. Change it in Settings → Worktrees.`,
+      });
+    }
+    const identity = `${yield* readGitCommonDir(cwd)}\0${branch}`;
+    const hash = yield* digest.digest(Digest.sha256, new TextEncoder().encode(identity));
+    // UTF-8 bytes bound UTF-16 length too, leaving room for files on Windows.
+    let prefix = "";
+    for (const character of branch.replace(/\//g, "-")) {
+      if (Buffer.byteLength(prefix + character) > 23) break;
+      prefix += character;
+    }
+    const directoryName = `${prefix}-${Hex.encode(hash).slice(0, 16)}`;
+    // Resolve sub/.. before taking the basename.
+    return path.join(parentDir, path.basename(path.resolve(cwd)), directoryName);
+  });
+
   const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
     "createWorktree",
   )(function* (input, options) {
     yield* refuseOptionLikeRefName("GitVcsDriver.createWorktree", input.cwd, input.refName);
     yield* refuseOptionLikeRefName("GitVcsDriver.createWorktree", input.cwd, input.newRefName);
-    const targetBranch = input.newRefName ?? input.refName;
-    // Resolve sub/.. before taking the basename.
-    const repoName = path.basename(path.resolve(input.cwd));
-    let worktreePath = input.path;
-    if (worktreePath == null) {
-      const wtLayoutContainer = yield* resolveWtLayoutContainer(input.cwd);
-      if (wtLayoutContainer) {
-        // The wt layout names each worktree after its whole branch, so this skips the shortening.
-        worktreePath = path.join(wtLayoutContainer, "worktrees", targetBranch.replace(/\//g, "-"));
-      } else {
-        const parentDir = resolveWorktreesDirectory(
-          options?.worktreesDirectory ?? "",
-          worktreesDir,
-          path,
-          yield* HostProcess.HomeDirectory,
-        );
-        if (parentDir === null) {
-          return yield* new GitCommandError({
-            operation: "GitVcsDriver.createWorktree",
-            command: "git worktree add",
-            cwd: input.cwd,
-            detail: `The worktree location "${options?.worktreesDirectory}" must be an absolute folder on this machine, not a drive root. Change it in Settings → Worktrees.`,
-          });
-        }
-        const identity = `${yield* readGitCommonDir(input.cwd)}\0${targetBranch}`;
-        const hash = yield* digest.digest(Digest.sha256, new TextEncoder().encode(identity));
-        // UTF-8 bytes bound UTF-16 length too, leaving room for files on Windows.
-        let prefix = "";
-        for (const character of targetBranch.replace(/\//g, "-")) {
-          if (Buffer.byteLength(prefix + character) > 23) break;
-          prefix += character;
-        }
-        const directoryName = `${prefix}-${Hex.encode(hash).slice(0, 16)}`;
-        worktreePath = path.join(parentDir, repoName, directoryName);
-      }
+    if (options?.generatedBranchName && input.newRefName) {
+      return yield* createWorktreeOnGeneratedBranch(
+        { ...input, newRefName: input.newRefName },
+        { ...options, generatedBranchName: false },
+      );
     }
+    const targetBranch = input.newRefName ?? input.refName;
+    const worktreePath =
+      input.path ??
+      (yield* defaultWorktreePath(input.cwd, targetBranch, options?.worktreesDirectory));
     const newRefName = input.newRefName;
     if (newRefName) {
       // Kept apart from the checkout so the shared-config lock only covers the tracking write.
       yield* createBranchAt(
-        "GitVcsDriver.createWorktree.createBranch",
+        CREATE_WORKTREE_BRANCH_OPERATION,
         { cwd: input.cwd, branch: newRefName, startPoint: input.refName },
         "git worktree add failed",
       );
@@ -5098,7 +5145,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     if (progress?.onWorktreeClaimed) {
-      yield* progress.onWorktreeClaimed(worktreePath);
+      yield* progress.onWorktreeClaimed(worktreePath, newRefName);
     }
 
     // worktree add leaves submodules empty, potentially omitting project skills, tools or source.
@@ -5211,6 +5258,40 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         refName: targetBranch,
       },
     };
+  });
+
+  const createWorktreeOnGeneratedBranch = Effect.fn("createWorktreeOnGeneratedBranch")(function* (
+    input: VcsCreateWorktreeInput & { readonly newRefName: string },
+    options: GitVcsDriver.CreateWorktreeOptions,
+  ) {
+    const requestedBranch = yield* prefixGeneratedWtBranch(input.cwd, input.newRefName);
+    const isFolderTaken = (branch: string) =>
+      input.path === null
+        ? defaultWorktreePath(input.cwd, branch, options.worktreesDirectory).pipe(
+            Effect.flatMap((worktreePath) => fileSystem.exists(worktreePath)),
+            Effect.orElseSucceed(() => false),
+          )
+        : Effect.succeed(false);
+    // A concurrent launch can claim the same branch or folder between the check and the add, so
+    // only those failures move on to the next free name.
+    for (let attempt = 1; ; attempt += 1) {
+      const newRefName = yield* resolveAvailableBranchName(
+        input.cwd,
+        requestedBranch,
+        isFolderTaken,
+      );
+      const created = yield* Effect.result(createWorktree({ ...input, newRefName }, options));
+      if (Result.isSuccess(created)) return created.success;
+      const { operation, reason } = created.failure;
+      // A failed `git branch` (taken name or ref lock) leaves no branch of its own behind.
+      const lostRace =
+        (reason === "path_already_exists" && input.path === null) ||
+        (operation === CREATE_WORKTREE_BRANCH_OPERATION &&
+          (yield* branchExists(input.cwd, newRefName).pipe(Effect.orElseSucceed(() => false))));
+      if (!lostRace || attempt === MAX_GENERATED_BRANCH_ATTEMPTS) {
+        return yield* created.failure;
+      }
+    }
   });
 
   const fetchRefIntoBranch: GitVcsDriver.GitVcsDriver["Service"]["fetchRefIntoBranch"] = Effect.fn(
@@ -5621,9 +5702,40 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     });
   });
 
+  // Undoes linkWtTrackingBranch, leaving a <branch> that main/ gave commits of its own.
+  const unlinkWtTrackingBranch = Effect.fn("unlinkWtTrackingBranch")(function* (
+    cwd: string,
+    branch: string,
+  ) {
+    const prefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    if (!branch.startsWith(prefix)) return;
+    const trackingBranch = branch.slice(prefix.length);
+    const [remote, merge] = yield* Effect.all([
+      readConfigValue(cwd, `branch.${trackingBranch}.remote`),
+      readConfigValue(cwd, `branch.${trackingBranch}.merge`),
+    ]);
+    if (remote !== "." || merge !== `refs/heads/${branch}`) return;
+    // -d refuses a branch that has commits its upstream lacks.
+    yield* executeGit(
+      "GitVcsDriver.unlinkWtTrackingBranch",
+      cwd,
+      ["branch", "-d", "--", trackingBranch],
+      {
+        timeoutMs: 10_000,
+        fallbackErrorDetail: "git branch delete failed",
+        writesSharedConfig: true,
+      },
+    );
+  });
+
   const deleteLocalBranch: GitVcsDriver.GitVcsDriver["Service"]["deleteLocalBranch"] = Effect.fn(
     "deleteLocalBranch",
   )(function* (input) {
+    if (input.withWtTrackingBranch) {
+      yield* unlinkWtTrackingBranch(input.cwd, input.refName).pipe(
+        Effect.ignoreCause({ log: true }),
+      );
+    }
     yield* executeGit(
       "GitVcsDriver.deleteLocalBranch",
       input.cwd,

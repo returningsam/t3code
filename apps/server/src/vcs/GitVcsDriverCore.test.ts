@@ -6030,6 +6030,157 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("adds wt/ to generated names only where main/ can track them", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        yield* writeTextFile(container, ".wt", "[wt]\n\tname = demo\n");
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const create = (repo: string, newRefName: string, generatedBranchName: boolean) =>
+          driver
+            .createWorktree(
+              { cwd: repo, path: null, refName: initialBranch, newRefName },
+              { generatedBranchName },
+            )
+            .pipe(Effect.map(({ worktree }) => worktree.refName));
+
+        assert.equal(yield* create(cwd, "user-picked", false), "user-picked");
+        assert.equal(yield* create(cwd, "deadbeef", true), "deadbeef");
+        assert.equal(yield* create(cwd, "wt/fix/i12-ui", true), "wt/fix/i12-ui");
+        assert.equal(yield* create(cwd, "fix-login", true), "wt/fix-login");
+        assert.equal(
+          yield* git(cwd, ["rev-parse", "--abbrev-ref", "fix-login@{upstream}"]),
+          "wt/fix-login",
+        );
+
+        // Deleting the wt/ branch takes main/'s tracking branch along unless main/ committed to it.
+        for (const [name, committed] of [
+          ["fix-cancel", false],
+          ["fix-kept", true],
+        ] as const) {
+          const { worktree } = yield* driver.createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: name },
+            { generatedBranchName: true },
+          );
+          if (committed) {
+            const commit = yield* git(cwd, [
+              "commit-tree",
+              "-p",
+              name,
+              "-m",
+              "local",
+              `${name}^{tree}`,
+            ]);
+            yield* git(cwd, ["update-ref", `refs/heads/${name}`, commit]);
+          }
+          yield* driver.removeWorktree({ cwd, path: worktree.path, force: true });
+          yield* driver.deleteLocalBranch({
+            cwd,
+            refName: worktree.refName,
+            force: true,
+            withWtTrackingBranch: true,
+          });
+          assert.equal(
+            yield* git(cwd, ["branch", "--list", name, `wt/${name}`]),
+            committed ? name : "",
+          );
+        }
+
+        const blocked = pathService.join(yield* fileSystem.realPath(yield* makeTmpDir()), "main");
+        yield* fileSystem.makeDirectory(blocked);
+        yield* writeTextFile(pathService.dirname(blocked), ".wt", "[wt]\n\tname = blocked\n");
+        const blockedRepo = yield* initRepoWithCommit(blocked);
+        yield* git(blocked, ["branch", "wt"]);
+        assert.equal(
+          (yield* driver.createWorktree(
+            { cwd: blocked, path: null, refName: blockedRepo.initialBranch, newRefName: "fix-ui" },
+            { generatedBranchName: true },
+          )).worktree.refName,
+          "fix-ui",
+        );
+
+        const plainRepo = yield* makeTmpDir();
+        const plain = yield* initRepoWithCommit(plainRepo);
+        const created = yield* driver.createWorktree(
+          { cwd: plainRepo, path: null, refName: plain.initialBranch, newRefName: "fix-login" },
+          { generatedBranchName: true },
+        );
+        assert.equal(created.worktree.refName, "fix-login");
+        yield* driver.removeWorktree({ cwd: plainRepo, path: created.worktree.path, force: true });
+      }),
+    );
+
+    it.effect("moves a generated name to the next free one and names the folder after it", () =>
+      Effect.gen(function* () {
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const container = yield* fileSystem.realPath(yield* makeTmpDir("git-wt-layout-"));
+        yield* writeTextFile(container, ".wt", "[wt]\n\tname = demo\n");
+        const cwd = pathService.join(container, "main");
+        yield* fileSystem.makeDirectory(cwd);
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const folder = (branch: string) =>
+          pathService.join(container, "worktrees", branch.replaceAll("/", "-"));
+        const create = (newRefName: string) =>
+          driver
+            .createWorktree(
+              { cwd, path: null, refName: initialBranch, newRefName },
+              { generatedBranchName: true },
+            )
+            .pipe(Effect.map(({ worktree }) => worktree));
+
+        const expectCreated = (newRefName: string, branch: string) =>
+          create(newRefName).pipe(
+            Effect.map((worktree) =>
+              assert.deepEqual(worktree, { refName: branch, path: folder(branch) }),
+            ),
+          );
+        yield* expectCreated("wt/fix/i12-sidebar-counts", "wt/fix/i12-sidebar-counts");
+        yield* expectCreated("wt/fix/i12-sidebar-counts", "wt/fix/i12-sidebar-counts-1");
+        // main/ needs its tracking branch free, and the folder can't already exist or belong to
+        // another branch.
+        yield* git(cwd, ["branch", "fix-api"]);
+        yield* expectCreated("fix-api", "wt/fix-api-1");
+        yield* fileSystem.makeDirectory(folder("wt/fix-docs"), { recursive: true });
+        yield* writeTextFile(folder("wt/fix-docs"), "notes.txt", "kept\n");
+        yield* expectCreated("fix-docs", "wt/fix-docs-1");
+        yield* git(cwd, ["branch", "wt/fix/alias"]);
+        yield* expectCreated("fix-alias", "wt/fix-alias-1");
+
+        // A folder that appears between the check and the checkout moves the name on too.
+        const held = folder("wt/fix-held");
+        yield* writeTextFile(
+          cwd,
+          ".git/hooks/reference-transaction",
+          `#!/bin/sh\n[ "$1" = committed ] && grep -q ' refs/heads/wt/fix-held$' && mkdir -p '${held}' && echo held > '${held}/held.txt'\nexit 0\n`,
+        );
+        yield* fileSystem.chmod(pathService.join(cwd, ".git/hooks/reference-transaction"), 0o755);
+        yield* expectCreated("fix-held", "wt/fix-held-1");
+        assert.equal(yield* git(cwd, ["branch", "--list", "wt/fix-held"]), "");
+        yield* fileSystem.remove(pathService.join(cwd, ".git/hooks/reference-transaction"));
+
+        const raced = yield* Effect.all([create("fix-race"), create("fix-race")], {
+          concurrency: "unbounded",
+        });
+        assert.deepEqual(raced.map((worktree) => worktree.refName).toSorted(), [
+          "wt/fix-race",
+          "wt/fix-race-1",
+        ]);
+        for (const worktree of raced) assert.equal(worktree.path, folder(worktree.refName));
+
+        // A failure other than a lost race is not retried under the next name.
+        yield* writeTextFile(cwd, ".git/hooks/post-checkout", "#!/bin/sh\nexit 2\n");
+        yield* fileSystem.chmod(pathService.join(cwd, ".git/hooks/post-checkout"), 0o755);
+        yield* Effect.flip(create("fix-hook"));
+        assert.equal(yield* git(cwd, ["branch", "--list", "wt/fix-hook-1"]), "");
+      }),
+    );
+
     it.effect("leaves a folder alone that only shares the worktree's short name", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

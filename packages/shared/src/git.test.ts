@@ -359,10 +359,26 @@ describe("formatGeneratedBranchName", () => {
     [" Team / Jules.lock/", "Team/Jules-lock/add-search"],
     ["-team//feature@{new}", "team/feature-new/add-search"],
     [" /?. / ", "add-search"],
+    ["t3", "add-search"],
+    ["T3Code/team/t3", "team/add-search"],
   ])("normalizes invalid static prefix %s", (prefix, expected) => {
     expect(
       formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),
     ).toBe(expected);
+  });
+  it.each([
+    ["wt/fix/i12-Sidebar-Counts", "wt/fix/i12-Sidebar-Counts"],
+    ["wt/fix/I12 Sidebar: Counts?", "wt/fix/I12-Sidebar-Counts"],
+    [" -wt//fix/login..page.lock/ ", "wt/fix/login.page-lock"],
+    [".hidden/v2@{now}~1.", "hidden/v2-now}-1"],
+    ["???", "update"],
+    ["HEAD", "head"],
+    [`wt/fix/${"a".repeat(120)}`, `wt/fix/${"a".repeat(93)}`],
+    [`wt/fix/${"a".repeat(92)}/.lock`, `wt/fix/${"a".repeat(92)}`],
+  ])("keeps the shape of custom name %s while making it valid", (raw, expected) => {
+    expect(formatGeneratedBranchName(raw, { mode: "custom", prefix: "wt", instructions: "" })).toBe(
+      expected,
+    );
   });
   it("uses the model's semantic prefix without the stored static prefix", () => {
     expect(

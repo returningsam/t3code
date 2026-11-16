@@ -66,15 +66,18 @@ A project on several machines must have every machine connected to pin or archiv
 
 In **Settings → Worktrees → Worktree branch naming**, choose a static prefix,
 a model-selected semantic prefix such as `feat/` or `fix/`, or custom instructions
-for the complete name. The static prefix defaults to `t3/`; a trailing slash is
+for the complete name. The static prefix defaults to `wt/`; a trailing slash is
 optional, and an empty prefix adds nothing. Invalid characters in a static prefix
-are replaced with hyphens. Custom instructions are appended to
-the naming prompt and can specify issue IDs, namespaces, and casing.
+are replaced with hyphens, and a `t3` or `t3code` part is dropped. Custom instructions
+are appended to the naming prompt and can specify issue IDs, namespaces, and casing.
 
 These settings apply to automatically named new worktree branches. Select a project
-to override its environment defaults. Worktree directories keep their original names.
-If generation fails, or a custom name is invalid or already taken, the temporary
-branch name remains.
+to override its environment defaults. In a repository with a `.wt` file, every generated
+name starts with `wt/`, and the checkout in `main/` gets a branch without the prefix that
+tracks it. Each worktree's folder is named after its branch,
+shortened if the name is long. Characters Git rejects in a custom name are replaced, and
+a name that is already taken gets a numeric suffix such as `-1`. If generation fails or
+takes longer than 30 seconds, the worktree gets a temporary branch name.
 
 ## Scheduled tasks on mobile
 

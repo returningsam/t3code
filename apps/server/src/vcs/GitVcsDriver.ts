@@ -129,7 +129,10 @@ export interface ExecuteGitProgress {
 
 export interface CreateWorktreeProgress {
   /** Git refuses existing paths; claimed paths belong to this call and can be removed on cancel. */
-  readonly onWorktreeClaimed?: (path: string) => Effect.Effect<void, never>;
+  readonly onWorktreeClaimed?: (
+    path: string,
+    createdBranch: string | undefined,
+  ) => Effect.Effect<void, never>;
   readonly onCheckoutProgress?: (input: {
     percent: number;
     completed: number;
@@ -153,6 +156,11 @@ export interface CreateWorktreeOptions {
   readonly worktreesDirectory?: string;
   /** Clone the checkout from the macOS worktree checkout cache. */
   readonly fastCheckout?: boolean;
+  /**
+   * T3 generated `newRefName`: the wt layout gives it the wt/ prefix, and a name whose branch or
+   * folder is taken moves to the next free one.
+   */
+  readonly generatedBranchName?: boolean;
 }
 
 export interface GitCommitProgress {
@@ -178,6 +186,8 @@ export interface GitDeleteLocalBranchInput {
   readonly cwd: string;
   readonly refName: string;
   readonly force?: boolean;
+  /** Also delete the branch main/ got for a wt/ branch, unless it has commits of its own. */
+  readonly withWtTrackingBranch?: boolean;
 }
 
 export interface GitPushResult {
