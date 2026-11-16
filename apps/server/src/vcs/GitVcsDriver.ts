@@ -186,6 +186,8 @@ export interface GitDeleteLocalBranchInput {
   readonly cwd: string;
   readonly refName: string;
   readonly force?: boolean;
+  /** Also delete the branch main/ got for a wt/ branch, unless it has commits of its own. */
+  readonly withWtTrackingBranch?: boolean;
 }
 
 export interface GitPushResult {

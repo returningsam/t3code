@@ -6057,6 +6057,39 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           "wt/fix-login",
         );
 
+        // Deleting the wt/ branch takes main/'s tracking branch along unless main/ committed to it.
+        for (const [name, committed] of [
+          ["fix-cancel", false],
+          ["fix-kept", true],
+        ] as const) {
+          const { worktree } = yield* driver.createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: name },
+            { generatedBranchName: true },
+          );
+          if (committed) {
+            const commit = yield* git(cwd, [
+              "commit-tree",
+              "-p",
+              name,
+              "-m",
+              "local",
+              `${name}^{tree}`,
+            ]);
+            yield* git(cwd, ["update-ref", `refs/heads/${name}`, commit]);
+          }
+          yield* driver.removeWorktree({ cwd, path: worktree.path, force: true });
+          yield* driver.deleteLocalBranch({
+            cwd,
+            refName: worktree.refName,
+            force: true,
+            withWtTrackingBranch: true,
+          });
+          assert.equal(
+            yield* git(cwd, ["branch", "--list", name, `wt/${name}`]),
+            committed ? name : "",
+          );
+        }
+
         const blocked = pathService.join(yield* fileSystem.realPath(yield* makeTmpDir()), "main");
         yield* fileSystem.makeDirectory(blocked);
         yield* writeTextFile(pathService.dirname(blocked), ".wt", "[wt]\n\tname = blocked\n");
@@ -6109,12 +6142,27 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           );
         yield* expectCreated("wt/fix/i12-sidebar-counts", "wt/fix/i12-sidebar-counts");
         yield* expectCreated("wt/fix/i12-sidebar-counts", "wt/fix/i12-sidebar-counts-1");
-        // main/ needs its tracking branch free, and Git refuses a folder that is in use.
+        // main/ needs its tracking branch free, and the folder can't already exist or belong to
+        // another branch.
         yield* git(cwd, ["branch", "fix-api"]);
         yield* expectCreated("fix-api", "wt/fix-api-1");
         yield* fileSystem.makeDirectory(folder("wt/fix-docs"), { recursive: true });
         yield* writeTextFile(folder("wt/fix-docs"), "notes.txt", "kept\n");
         yield* expectCreated("fix-docs", "wt/fix-docs-1");
+        yield* git(cwd, ["branch", "wt/fix/alias"]);
+        yield* expectCreated("fix-alias", "wt/fix-alias-1");
+
+        // A folder that appears between the check and the checkout moves the name on too.
+        const held = folder("wt/fix-held");
+        yield* writeTextFile(
+          cwd,
+          ".git/hooks/reference-transaction",
+          `#!/bin/sh\n[ "$1" = committed ] && grep -q ' refs/heads/wt/fix-held$' && mkdir -p '${held}' && echo held > '${held}/held.txt'\nexit 0\n`,
+        );
+        yield* fileSystem.chmod(pathService.join(cwd, ".git/hooks/reference-transaction"), 0o755);
+        yield* expectCreated("fix-held", "wt/fix-held-1");
+        assert.equal(yield* git(cwd, ["branch", "--list", "wt/fix-held"]), "");
+        yield* fileSystem.remove(pathService.join(cwd, ".git/hooks/reference-transaction"));
 
         const raced = yield* Effect.all([create("fix-race"), create("fix-race")], {
           concurrency: "unbounded",

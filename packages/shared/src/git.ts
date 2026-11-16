@@ -70,6 +70,7 @@ export function formatGeneratedBranchName(raw: string, naming?: BranchNamingOpti
         .replace(/-+/g, "-")
         .replace(/^-+|-+$/g, ""),
     )
+    // t3 was the old default, and project overrides may still carry it.
     .filter((part) => part && !/^t3(code)?$/i.test(part))
     .join("/");
   return prefix ? `${prefix}/${branch}` : branch;

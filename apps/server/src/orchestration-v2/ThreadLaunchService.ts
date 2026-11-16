@@ -629,6 +629,7 @@ const make = Effect.gen(function* () {
                           cwd: project.workspaceRoot,
                           refName: removedBranch,
                           force: true,
+                          withWtTrackingBranch: true,
                         })
                         .pipe(Effect.ignoreCause({ log: true })),
                 ),

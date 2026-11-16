@@ -1415,11 +1415,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     const desiredBranch = blockedByParent ? segments.join("-") : requestedBranch;
     const wtPrefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    const wtLayout = (yield* resolveWtLayoutContainer(cwd)) !== null;
     // linkWtTrackingBranch skips an existing <branch>, so it has to be free too.
-    const needsFreeTrackingBranch =
-      desiredBranch.startsWith(wtPrefix) && (yield* resolveWtLayoutContainer(cwd)) !== null;
+    const needsFreeTrackingBranch = wtLayout && desiredBranch.startsWith(wtPrefix);
+    // wt layout folders replace / with -, so wt/a/b and wt/a-b would share one.
+    const takenFolders = new Set(
+      wtLayout ? [...branches].map((branch) => branch.replaceAll("/", "-")) : [],
+    );
     const isBlocked = (name: string) =>
       blockedNames.has(name.toLowerCase()) ||
+      takenFolders.has(name.toLowerCase().replaceAll("/", "-")) ||
       (needsFreeTrackingBranch && blockedNames.has(name.slice(wtPrefix.length).toLowerCase()));
     const isTaken = (name: string) =>
       isBlocked(name) ? Effect.succeed(true) : isFolderTaken(name);
@@ -5280,7 +5285,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const { operation, reason } = created.failure;
       // A failed `git branch` (taken name or ref lock) leaves no branch of its own behind.
       const lostRace =
-        reason === "path_already_exists" ||
+        (reason === "path_already_exists" && input.path === null) ||
         (operation === CREATE_WORKTREE_BRANCH_OPERATION &&
           (yield* branchExists(input.cwd, newRefName).pipe(Effect.orElseSucceed(() => false))));
       if (!lostRace || attempt === MAX_GENERATED_BRANCH_ATTEMPTS) {
@@ -5697,9 +5702,40 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     });
   });
 
+  // Undoes linkWtTrackingBranch, leaving a <branch> that main/ gave commits of its own.
+  const unlinkWtTrackingBranch = Effect.fn("unlinkWtTrackingBranch")(function* (
+    cwd: string,
+    branch: string,
+  ) {
+    const prefix = `${WORKTREE_BRANCH_PREFIX}/`;
+    if (!branch.startsWith(prefix)) return;
+    const trackingBranch = branch.slice(prefix.length);
+    const [remote, merge] = yield* Effect.all([
+      readConfigValue(cwd, `branch.${trackingBranch}.remote`),
+      readConfigValue(cwd, `branch.${trackingBranch}.merge`),
+    ]);
+    if (remote !== "." || merge !== `refs/heads/${branch}`) return;
+    // -d refuses a branch that has commits its upstream lacks.
+    yield* executeGit(
+      "GitVcsDriver.unlinkWtTrackingBranch",
+      cwd,
+      ["branch", "-d", "--", trackingBranch],
+      {
+        timeoutMs: 10_000,
+        fallbackErrorDetail: "git branch delete failed",
+        writesSharedConfig: true,
+      },
+    );
+  });
+
   const deleteLocalBranch: GitVcsDriver.GitVcsDriver["Service"]["deleteLocalBranch"] = Effect.fn(
     "deleteLocalBranch",
   )(function* (input) {
+    if (input.withWtTrackingBranch) {
+      yield* unlinkWtTrackingBranch(input.cwd, input.refName).pipe(
+        Effect.ignoreCause({ log: true }),
+      );
+    }
     yield* executeGit(
       "GitVcsDriver.deleteLocalBranch",
       input.cwd,

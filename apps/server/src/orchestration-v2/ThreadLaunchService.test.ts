@@ -2245,6 +2245,7 @@ it.effect("cancels tracked setup before provider work is released", () =>
         cwd: "/repo",
         refName: "generated-branch",
         force: true,
+        withWtTrackingBranch: true,
       });
       assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
     }).pipe(Effect.provide(harness.layer));
@@ -2404,6 +2405,34 @@ it.effect.each([
         projection.thread.branch,
         named ? "wt/fix/i12-sidebar-counts-1" : create.newRefName,
       );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("names the branch while the origin fetch runs", () =>
+  Effect.gen(function* () {
+    const namingStarted = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      generateBranchName: () =>
+        Deferred.succeed(namingStarted, undefined).pipe(Effect.as({ branch: "wt/fix/overlap" })),
+      // Naming that waits for the fetch to finish never lets this return.
+      fetchWorktreeBaseCommit: () =>
+        Deferred.await(namingStarted).pipe(
+          Effect.as({ commitSha: "remote-main-sha", remoteRefName: "origin/main" }),
+        ),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "launch:naming-overlap",
+          thread: "thread:naming-overlap",
+          message: "Fix the overlap",
+          workspace: worktreeStrategy,
+        }),
+      );
+      yield* preparationSettled(launched.threadId);
+      assert.equal(harness.createWorktree.mock.calls[0]?.[0].newRefName, "wt/fix/overlap");
     }).pipe(Effect.provide(harness.layer));
   }),
 );
