@@ -7,7 +7,9 @@ import {
   reduceDesktopUpdateStateOnDownloadComplete,
   reduceDesktopUpdateStateOnDownloadFailure,
   reduceDesktopUpdateStateOnInstallFailure,
+  reduceDesktopUpdateStateOnInstallWhenIdle,
   reduceDesktopUpdateStateOnNoUpdate,
+  reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine.ts";
 
 const runtimeInfo = {
@@ -87,6 +89,38 @@ describe("updateMachine", () => {
     expect(failedInstall.status).toBe("downloaded");
     expect(failedInstall.errorContext).toBe("install");
     expect(failedInstall.canRetry).toBe(true);
+  });
+
+  it("queues only a downloaded update and drops the queue when its download is replaced or fails", () => {
+    const available = {
+      ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+      enabled: true,
+      status: "available" as const,
+      availableVersion: "1.1.0",
+    };
+    const downloaded = reduceDesktopUpdateStateOnDownloadComplete(available, "1.1.0");
+    const queued = reduceDesktopUpdateStateOnInstallWhenIdle(downloaded, true);
+
+    expect(reduceDesktopUpdateStateOnInstallWhenIdle(available, true)).toBe(available);
+    expect(queued.installWhenIdle).toBe(true);
+    expect(reduceDesktopUpdateStateOnInstallWhenIdle(queued, false)).toEqual(downloaded);
+    expect(
+      reduceDesktopUpdateStateOnCheckFailure(
+        reduceDesktopUpdateStateOnCheckStart(queued, "2026-03-04T00:00:00.000Z"),
+        "network unavailable",
+        "2026-03-04T00:00:01.000Z",
+      ).installWhenIdle,
+    ).toBe(true);
+    expect(
+      reduceDesktopUpdateStateOnUpdateAvailable(queued, "1.1.0", "2026-03-04T00:00:00.000Z")
+        .installWhenIdle,
+    ).toBe(true);
+    expect(
+      reduceDesktopUpdateStateOnUpdateAvailable(queued, "1.2.0", "2026-03-04T00:00:00.000Z"),
+    ).not.toHaveProperty("installWhenIdle");
+    expect(
+      reduceDesktopUpdateStateOnInstallFailure(queued, "installer refused"),
+    ).not.toHaveProperty("installWhenIdle");
   });
 
   it("clears stale available state when no update is available", () => {

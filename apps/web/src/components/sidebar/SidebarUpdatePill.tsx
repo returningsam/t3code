@@ -9,21 +9,23 @@ import { flushSync } from "react-dom";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../../env";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { requestConfirmDialogChoice } from "../../confirmDialog";
 import { cn } from "../../lib/utils";
-import { ensureLocalApi } from "../../localApi";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { usePrimaryManagedPolicy } from "../../state/managedPolicy";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   canCheckForUpdate,
+  type DesktopUpdateInstallAction,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateDownloadedVersion,
   getDesktopUpdateIdleTooltip,
-  getDesktopUpdateInstallConfirmationMessage,
+  getDesktopUpdateInstallDialog,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
+  resolveDesktopUpdateInstallAction,
   shouldShowArm64IntelBuildWarning,
   shouldToastDesktopUpdateActionResult,
 } from "../desktopUpdate.logic";
@@ -85,12 +87,14 @@ function resolveSidebarUpdatePresentation({
   run,
   isDownloading,
   showCheckIcon,
+  installQueued,
 }: {
   readonly action: ReturnType<typeof resolveDesktopUpdateButtonAction>;
   readonly showsEverything: boolean;
   readonly run: UpdateEverythingRun | null;
   readonly isDownloading: boolean;
   readonly showCheckIcon: boolean;
+  readonly installQueued: boolean;
 }) {
   const showUpdateDetails = action !== "none" || showsEverything || run !== null || isDownloading;
   const iconStatus: DesktopUpdateStatusIconState = showCheckIcon
@@ -104,7 +108,9 @@ function resolveSidebarUpdatePresentation({
         : showsEverything
           ? "everything"
           : action === "install"
-            ? "downloaded"
+            ? installQueued
+              ? "queued"
+              : "downloaded"
             : action === "download"
               ? "available"
               : "idle";
@@ -192,6 +198,30 @@ export async function installLocalUpdate(
   }
 }
 
+/** Asks how to install the downloaded update; null means the user backed out. */
+export async function chooseLocalUpdateInstall(
+  state: DesktopUpdateState,
+): Promise<DesktopUpdateInstallAction | null> {
+  const dialog = getDesktopUpdateInstallDialog(state);
+  const choice = await requestConfirmDialogChoice(dialog.message, dialog.options);
+  return resolveDesktopUpdateInstallAction(state, choice ?? "cancel");
+}
+
+export async function setLocalUpdateInstallWhenIdle(
+  bridge: DesktopBridge,
+  queued: boolean,
+  reportError: ReportLocalUpdateError = toastUpdateError,
+): Promise<void> {
+  try {
+    await bridge.setInstallWhenIdle(queued);
+  } catch (error) {
+    reportError(
+      queued ? "Could not queue the restart" : "Could not cancel the queued restart",
+      error instanceof Error ? error.message : "An unexpected error occurred.",
+    );
+  }
+}
+
 export function SidebarUpdatePill() {
   return <SidebarUpdateControl />;
 }
@@ -234,7 +264,9 @@ function SidebarUpdateControl() {
     state && action !== "none" ? getDesktopUpdateDownloadedVersion(state) : null;
   const everything = useUpdateEverything(localUpdateVersion);
   const checkProviderUpdates = useCheckProviderUpdates();
-  const runsEverything = everything.hasUpdates && !isDownloading;
+  const installQueued = state?.installWhenIdle === true;
+  // A queued restart owns the button, so it stays visible and cancellable.
+  const runsEverything = everything.hasUpdates && !isDownloading && !installQueued;
   const run = useUpdateEverythingRun();
   const isRunningEverything = run !== null;
   const showCheckIcon = shouldShowDesktopUpdateCheckIcon({
@@ -248,6 +280,7 @@ function SidebarUpdateControl() {
     run,
     isDownloading,
     showCheckIcon,
+    installQueued,
   });
   const idleTooltip =
     !showUpdateDetails && !showCheckIcon ? getDesktopUpdateIdleTooltip(state, updatesDenial) : null;
@@ -304,28 +337,16 @@ function SidebarUpdateControl() {
     }
 
     if (action === "install") {
-      let confirmed = false;
-      try {
-        confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(state),
-          { initialFocus: "confirm" },
-        );
-      } catch (error) {
-        setIsActionPending(false);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not confirm update",
-            description: error instanceof Error ? error.message : "Update confirmation failed.",
-          }),
-        );
-        return;
-      }
-      if (!confirmed) {
+      const installAction = await chooseLocalUpdateInstall(state);
+      if (installAction === null) {
         setIsActionPending(false);
         return;
       }
-      void installLocalUpdate(bridge).finally(() => setIsActionPending(false));
+      void (
+        installAction === "restart-now"
+          ? installLocalUpdate(bridge)
+          : setLocalUpdateInstallWhenIdle(bridge, installAction === "restart-when-idle")
+      ).finally(() => setIsActionPending(false));
       return;
     }
 

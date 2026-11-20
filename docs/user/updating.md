@@ -36,6 +36,23 @@ The confirmation counts the running threads that the restarts will interrupt,
 and how many can resume afterwards. See **Continue threads after restarts**
 below.
 
+## Restart when agents finish
+
+When the desktop app has downloaded an update, its update button, **Settings →
+About**, and **Check for Updates...** in the app menu offer **Restart when
+idle**. T3 Code then installs the update and restarts on its own once no agent
+on this machine is working, waiting for your approval or input, or about to
+start a queued message. It waits a minute after the last one stops, so a
+follow-up message or a parent thread resuming after its subagents is not cut
+off. Agents on other machines keep running through a desktop restart, so they
+do not hold it up.
+
+While a restart is queued, the update button shows a clock. Click it to restart
+now or cancel the queued restart. The button offers **Update everything** again
+once the restart is cancelled, and that still restarts right away. An update
+error or a newer release found by a manual check cancels the queued restart, and
+quitting T3 Code drops it.
+
 ## Switch between Stable and Nightly
 
 In the desktop app, change **Settings → About → Update track**. T3 Code shows each

@@ -279,6 +279,41 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("installs a queued update only once this machine's agents are idle", () =>
+    Effect.gen(function* () {
+      const installed = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        agentsIdle: false,
+        quitAndInstall: Deferred.succeed(installed, undefined).pipe(Effect.asVoid),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          yield* TestClock.adjust("15 seconds");
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          assert.isTrue((yield* updates.setInstallWhenIdle(true)).installWhenIdle);
+          // A poll that found a newer release would drop the queued download.
+          yield* TestClock.adjust("4 hours");
+          assert.equal(harness.checkCount(), 1);
+          assert.equal(harness.quitAndInstalls(), 0);
+
+          assert.isUndefined((yield* updates.setInstallWhenIdle(false)).installWhenIdle);
+          yield* harness.setAgentsIdle(true);
+          yield* flushCallbacks;
+          assert.equal(harness.quitAndInstalls(), 0);
+
+          yield* updates.setInstallWhenIdle(true);
+          yield* Deferred.await(installed);
+          assert.equal(harness.quitAndInstalls(), 1);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
   it.effect.each([
     { action: "download", offer: "update-available", found: null, accepted: true },
     { action: "install", offer: "update-downloaded", found: null, accepted: true },
@@ -360,6 +395,7 @@ describe("DesktopUpdates", () => {
 
   it.effect("preserves a queued installer after a background updater error", () => {
     const harness = makeHarness({
+      agentsIdle: false,
       checkForUpdates: Effect.sync(() => harness.emit("update-not-available")),
     });
 
@@ -369,6 +405,7 @@ describe("DesktopUpdates", () => {
         yield* updates.configure;
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
+        yield* updates.setInstallWhenIdle(true);
 
         harness.emit("error", new Error("background updater failure"));
         yield* flushCallbacks;
@@ -377,6 +414,7 @@ describe("DesktopUpdates", () => {
         assert.equal(state.status, "error");
         assert.equal(state.downloadedVersion, "1.2.4");
         assert.isNull(state.errorContext);
+        assert.isUndefined(state.installWhenIdle);
 
         const result = yield* updates.install;
         assert.isTrue(result.accepted);

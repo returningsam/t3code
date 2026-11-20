@@ -20,6 +20,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronPowerMonitor from "../electron/ElectronPowerMonitor.ts";
@@ -74,6 +75,8 @@ export class DesktopTelemetryPublisher extends Context.Service<
     readonly updateRequests: Stream.Stream<DesktopTelemetryRequestDesktopUpdate>;
     readonly updateCommits: Stream.Stream<DesktopTelemetryCommitDesktopUpdate>;
     readonly updateCancellations: Stream.Stream<DesktopTelemetryCancelDesktopUpdate>;
+    /** True while no backend reports busy agents; a backend that never reports counts as idle. */
+    readonly agentsIdle: Stream.Stream<boolean>;
   }
 >()("@t3tools/desktop/telemetry/DesktopTelemetryPublisher") {}
 
@@ -169,6 +172,15 @@ export const make = Effect.fn("desktop.telemetryPublisher.make")(function* () {
   const powerEvents = yield* Queue.unbounded<PowerEvent>();
   const sampleTriggers = yield* Queue.sliding<void>(1);
   const diagnosticsDemandSources = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const busyAgentSources = yield* SubscriptionRef.make<ReadonlySet<string>>(new Set());
+  const setAgentsBusy = (sourceId: string, busy: boolean) =>
+    SubscriptionRef.update(busyAgentSources, (sources) => {
+      if (sources.has(sourceId) === busy) return sources;
+      const next = new Set(sources);
+      if (busy) next.add(sourceId);
+      else next.delete(sourceId);
+      return next;
+    });
   const latest = yield* Ref.make(Option.none<DesktopHostTelemetrySnapshot>());
   const changes = yield* PubSub.sliding<DesktopHostTelemetrySnapshot>(8);
   const sequence = yield* Ref.make(0);
@@ -352,6 +364,8 @@ export const make = Effect.fn("desktop.telemetryPublisher.make")(function* () {
         return Queue.offer(updateCommitQueue, message).pipe(Effect.asVoid);
       case "cancelDesktopUpdate":
         return Queue.offer(updateCancellationQueue, message).pipe(Effect.asVoid);
+      case "agentActivity":
+        return setAgentsBusy(sourceId, message.busy);
       case "serverReady":
         return Effect.void;
     }
@@ -370,6 +384,7 @@ export const make = Effect.fn("desktop.telemetryPublisher.make")(function* () {
           ? Effect.void
           : Queue.offer(sampleTriggers, undefined).pipe(Effect.asVoid),
       ),
+      Effect.andThen(setAgentsBusy(sourceId, false)),
     );
 
   const snapshots = Stream.unwrap(
@@ -425,6 +440,10 @@ export const make = Effect.fn("desktop.telemetryPublisher.make")(function* () {
     updateRequests: Stream.fromQueue(updateRequestQueue),
     updateCommits: Stream.fromQueue(updateCommitQueue),
     updateCancellations: Stream.fromQueue(updateCancellationQueue),
+    agentsIdle: SubscriptionRef.changes(busyAgentSources).pipe(
+      Stream.map((sources) => sources.size === 0),
+      Stream.changes,
+    ),
   });
 });
 

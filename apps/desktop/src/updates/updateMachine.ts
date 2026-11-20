@@ -15,6 +15,22 @@ function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState): bool
   return currentState.availableVersion !== null;
 }
 
+export function withoutInstallWhenIdle(state: DesktopUpdateState): DesktopUpdateState {
+  if (state.installWhenIdle === undefined) return state;
+  const next = { ...state };
+  delete next.installWhenIdle;
+  return next;
+}
+
+export function hasInstallableDownload(state: DesktopUpdateState): boolean {
+  return (
+    state.downloadedVersion !== null &&
+    (state.status === "downloaded" ||
+      (state.status === "error" &&
+        (state.errorContext === null || state.errorContext === "install")))
+  );
+}
+
 export function createInitialDesktopUpdateState(
   currentVersion: string,
   runtimeInfo: DesktopRuntimeInfo,
@@ -96,7 +112,7 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
   const isDownloadedVersion = state.downloadedVersion === version;
   const preserveReleaseNotes = isDownloadedVersion && releaseNotes.length === 0;
   return {
-    ...state,
+    ...(isDownloadedVersion ? state : withoutInstallWhenIdle(state)),
     status: isDownloadedVersion ? "downloaded" : "available",
     availableVersion: version,
     downloadedVersion: isDownloadedVersion ? version : null,
@@ -204,12 +220,20 @@ export function reduceDesktopUpdateStateOnInstallFailure(
   message: string,
 ): DesktopUpdateState {
   return {
-    ...state,
+    ...withoutInstallWhenIdle(state),
     status: "downloaded",
     message,
     errorContext: "install",
     canRetry: true,
   };
+}
+
+export function reduceDesktopUpdateStateOnInstallWhenIdle(
+  state: DesktopUpdateState,
+  queued: boolean,
+): DesktopUpdateState {
+  if (!queued) return withoutInstallWhenIdle(state);
+  return hasInstallableDownload(state) ? { ...state, installWhenIdle: true } : state;
 }
 
 export interface DesktopUpdateInstallRecord {

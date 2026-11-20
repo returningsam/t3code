@@ -1,6 +1,19 @@
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  ConfirmDialogOptions,
+  DesktopUpdateActionResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
+
+import type { ConfirmDialogChoice, ConfirmDialogLabels } from "../confirmDialog";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
+
+export type DesktopUpdateInstallAction =
+  | "restart-now"
+  | "restart-when-idle"
+  | "cancel-queued-restart";
+
+export const DESKTOP_UPDATE_RESTART_QUEUED = "Restart queued until agents finish.";
 
 const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
 const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
@@ -89,6 +102,9 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
+  if (state.installWhenIdle) {
+    return `Restart queued for update ${state.downloadedVersion} until agents finish. Click to restart now or cancel.`;
+  }
   if (
     state.notAppliedVersion !== undefined &&
     (state.status === "available" || state.status === "downloaded") &&
@@ -126,11 +142,42 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
   return "Up to date";
 }
 
-export function getDesktopUpdateInstallConfirmationMessage(
-  state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
-): string {
+export function getDesktopUpdateInstallDialog(
+  state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion" | "installWhenIdle">,
+): {
+  readonly message: string;
+  readonly options: ConfirmDialogOptions & { readonly labels: ConfirmDialogLabels };
+} {
   const version = state.downloadedVersion ?? state.availableVersion;
-  return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
+  const update = `update${version ? ` ${version}` : ""}`;
+  return state.installWhenIdle
+    ? {
+        message: `Restart T3 Code now to install ${update}?\n\nA restart is already queued until no agent is working or waiting for you. Restart now interrupts any running tasks.`,
+        options: {
+          labels: {
+            confirm: "Restart now",
+            cancel: "Keep waiting",
+            alternative: "Cancel queued restart",
+          },
+        },
+      }
+    : {
+        message: `Install ${update} and restart T3 Code?\n\nRestart now interrupts any running tasks. Restart when idle waits until no agent is working or waiting for you.`,
+        options: {
+          initialFocus: "confirm",
+          labels: { confirm: "Restart now", cancel: "Cancel", alternative: "Restart when idle" },
+        },
+      };
+}
+
+/** Reads the choice against the dialog the user saw, which `state` built. */
+export function resolveDesktopUpdateInstallAction(
+  state: Pick<DesktopUpdateState, "installWhenIdle">,
+  choice: ConfirmDialogChoice,
+): DesktopUpdateInstallAction | null {
+  if (choice === "cancel") return null;
+  if (choice === "confirm") return "restart-now";
+  return state.installWhenIdle ? "cancel-queued-restart" : "restart-when-idle";
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {

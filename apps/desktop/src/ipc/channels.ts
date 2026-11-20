@@ -29,6 +29,7 @@ export const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 export const UPDATE_SET_CHANNEL_CHANNEL = "desktop:update-set-channel";
 export const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 export const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+export const UPDATE_SET_INSTALL_WHEN_IDLE_CHANNEL = "desktop:update-set-install-when-idle";
 export const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 export const CLI_COMMAND_GET_STATE_CHANNEL = "desktop:cli-command-get-state";
 export const CLI_COMMAND_INSTALL_CHANNEL = "desktop:cli-command-install";

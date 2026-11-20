@@ -37,9 +37,9 @@ import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
 import {
   canCheckForUpdate,
+  DESKTOP_UPDATE_RESTART_QUEUED,
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateDisabledReason,
-  getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
@@ -122,7 +122,11 @@ import { environmentIdsKey } from "~/state/environmentAtomList";
 import { environmentSessionStatesAtom } from "~/state/session";
 import { useCheckProviderUpdates } from "../ProviderUpdatesAction";
 import { canUpdateServer } from "../ServerUpdateAction";
-import { downloadLocalUpdate } from "../sidebar/SidebarUpdatePill";
+import {
+  chooseLocalUpdateInstall,
+  downloadLocalUpdate,
+  setLocalUpdateInstallWhenIdle,
+} from "../sidebar/SidebarUpdatePill";
 import { useUpdateEverythingRun } from "../sidebar/updateEverythingRun";
 import { awaitsTrackSwitch, channelSwitchLabel } from "../sidebar/updateEverything.logic";
 import { isHostedByThisApp } from "../sidebar/useUpdateEverything";
@@ -216,30 +220,18 @@ function AboutVersionSection() {
       return;
     }
 
-    if (action === "install") {
+    if (action === "install" && updateState) {
       if (isUpdateActionPending) return;
       setIsUpdateActionPending(true);
-      let confirmed = false;
-      try {
-        confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(
-            updateState ?? { availableVersion: null, downloadedVersion: null },
-          ),
-          { initialFocus: "confirm" },
-        );
-      } catch (error) {
+      const installAction = await chooseLocalUpdateInstall(updateState);
+      if (installAction === null) {
         setIsUpdateActionPending(false);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not confirm update",
-            description: error instanceof Error ? error.message : "Update confirmation failed.",
-          }),
-        );
         return;
       }
-      if (!confirmed) {
-        setIsUpdateActionPending(false);
+      if (installAction !== "restart-now") {
+        void setLocalUpdateInstallWhenIdle(bridge, installAction === "restart-when-idle").finally(
+          () => setIsUpdateActionPending(false),
+        );
         return;
       }
       void bridge
@@ -302,8 +294,9 @@ function AboutVersionSection() {
   };
   const buttonLabel =
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
-  const description =
-    action === "download" || action === "install"
+  const description = updateState?.installWhenIdle
+    ? DESKTOP_UPDATE_RESTART_QUEUED
+    : action === "download" || action === "install"
       ? "Update available."
       : (getDesktopUpdateDisabledReason(updateState, updatesDenial) ??
         "Current version of the application.");

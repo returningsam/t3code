@@ -89,6 +89,7 @@ const layerDesktopUpdates = ({ checkResult }: MenuServices) =>
     download: Effect.die("unexpected download"),
     install: Effect.die("unexpected install"),
     installPrepared: () => Effect.die("unexpected installPrepared"),
+    setInstallWhenIdle: () => Effect.die("unexpected setInstallWhenIdle"),
   } satisfies DesktopUpdates.DesktopUpdates["Service"]);
 
 const layerDesktopWindow = (selectedAction: Deferred.Deferred<string>) =>
@@ -366,6 +367,8 @@ describe("DesktopApplicationMenu", () => {
         downloadPercent: 100,
       });
       assert.include(`${dialog.title ?? ""} ${dialog.message} ${dialog.detail ?? ""}`, "0.1.7");
+      // Escape must neither restart nor queue a restart.
+      assert.equal(dialog.buttons?.[dialog.cancelId ?? 0], "Later");
     }),
   );
 });

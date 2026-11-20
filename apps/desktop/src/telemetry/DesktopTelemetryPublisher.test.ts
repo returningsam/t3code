@@ -124,6 +124,49 @@ describe("DesktopTelemetryPublisher", () => {
         assert.isDefined(closeFiber.pollUnsafe());
       }),
   );
+
+  it.effect("reports agents idle once every backend that reported busy is idle or gone", () =>
+    Effect.gen(function* () {
+      const publisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
+      const idle = publisher.agentsIdle.pipe(Stream.runHead, Effect.map(Option.getOrThrow));
+      const report = (sourceId: string, busy: boolean) =>
+        publisher.handleControlForSource(sourceId, { version: 1, type: "agentActivity", busy });
+
+      assert.isTrue(yield* idle);
+      yield* report("primary", true);
+      yield* report("wsl:Ubuntu", true);
+      yield* report("primary", false);
+      assert.isFalse(yield* idle);
+      yield* publisher.removeControlSource("wsl:Ubuntu");
+      assert.isTrue(yield* idle);
+    }).pipe(
+      Effect.provide(
+        DesktopTelemetryPublisher.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              layerElectronApp([]),
+              Layer.succeed(
+                ElectronPowerMonitor.ElectronPowerMonitor,
+                ElectronPowerMonitor.ElectronPowerMonitor.of({
+                  isOnBatteryPower: Effect.succeed(false),
+                  getSystemIdleTime: Effect.succeed(0),
+                  getSystemIdleState: () => Effect.succeed("active"),
+                  getCurrentThermalState: Effect.succeed("nominal"),
+                  onSimpleEvent: () => Effect.void,
+                  onThermalStateChange: () => Effect.void,
+                  onSpeedLimitChange: () => Effect.void,
+                }),
+              ),
+              layerHistory,
+              Layer.mock(DesktopShellEnvironment.DesktopShellEnvironment, {
+                updates: Stream.empty,
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 });
 
 describe("DesktopRendererHistory", () => {

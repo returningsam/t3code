@@ -38,6 +38,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
+import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
 import {
   normalizeDesktopUpdateReleaseNotes,
@@ -47,6 +48,7 @@ import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   createInitialDesktopUpdateState,
+  hasInstallableDownload,
   reduceDesktopUpdateStateOnCheckFailure,
   reduceDesktopUpdateStateOnCheckStart,
   reduceDesktopUpdateStateOnDownloadComplete,
@@ -54,9 +56,11 @@ import {
   reduceDesktopUpdateStateOnDownloadProgress,
   reduceDesktopUpdateStateOnDownloadStart,
   reduceDesktopUpdateStateOnInstallFailure,
+  reduceDesktopUpdateStateOnInstallWhenIdle,
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
   resolveNotAppliedInstallVersion,
+  withoutInstallWhenIdle,
 } from "./updateMachine.ts";
 
 const CHANNEL_CHANGE_RETRY_DELAY = Duration.seconds(1);
@@ -221,6 +225,7 @@ export class DesktopUpdates extends Context.Service<
     readonly installPrepared: (
       expectedVersion: string,
     ) => Effect.Effect<DesktopPreparedUpdateInstallResult>;
+    readonly setInstallWhenIdle: (queued: boolean) => Effect.Effect<DesktopUpdateState>;
   }
 >()("@t3tools/desktop/updates/DesktopUpdates") {}
 
@@ -384,6 +389,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const policy = yield* DesktopUpdatePolicy.DesktopUpdatePolicy;
+  const telemetryPublisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
   // Any user can set the mock flag, so it never replaces an administrator's update source.
   const mockUpdates = config.mockUpdates && policy.message === null;
 
@@ -442,6 +448,14 @@ export const make = Effect.gen(function* () {
         return setState(nextState).pipe(Effect.as(nextState));
       }),
     );
+
+  const subscribeState = stateMutex.withPermits(1)(
+    Effect.gen(function* () {
+      const subscription = yield* PubSub.subscribe(stateChanges);
+      const latest = yield* Ref.get(updateStateRef);
+      return { latest, changes: Stream.fromSubscription(subscription) };
+    }),
+  );
 
   const readAppUpdateYml = fileSystem.readFileString(environment.appUpdateYmlPath, "utf-8").pipe(
     Effect.option,
@@ -580,6 +594,8 @@ export const make = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     // A configured updater is disabled only by a channel the managed policy blocks.
     if (state.status === "disabled") return false;
+    // The queued install re-checks the feed itself, and an offer found now would drop its download.
+    if (reason === "poll" && state.installWhenIdle === true) return false;
     if (state.status === "downloading") {
       yield* logUpdaterInfo("skipping update check while update is active", {
         reason,
@@ -886,11 +902,7 @@ export const make = Effect.gen(function* () {
                 ? ("wait-for-check" as const)
                 : ("refused" as const);
             }
-            const hasInstallableDownload =
-              state.status === "downloaded" ||
-              (state.status === "error" &&
-                (state.errorContext === null || state.errorContext === "install"));
-            if (!hasInstallableDownload) return "refused" as const;
+            if (!hasInstallableDownload(state)) return "refused" as const;
             return (yield* tryStartUpdateAction("install"))
               ? ("admitted" as const)
               : ("refused" as const);
@@ -1023,6 +1035,33 @@ export const make = Effect.gen(function* () {
     };
   });
 
+  const installQueued = Effect.gen(function* () {
+    yield* logUpdaterInfo("agents are idle; installing the queued update");
+    const result = yield* installWithExpectedVersion();
+    // Nothing would retry a refused install, so the queued label would stay on screen.
+    if (!result.accepted) yield* updateState(withoutInstallWhenIdle);
+  }).pipe(Effect.withSpan("desktop.updates.installQueued"));
+
+  const installWhenAgentsIdle: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
+    const { latest, changes } = yield* subscribeState;
+    const queued = Stream.concat(Stream.succeed(latest), changes).pipe(
+      Stream.map((state) => state.installWhenIdle === true),
+    );
+    yield* Stream.zipLatestWith(queued, telemetryPublisher.agentsIdle, (q, idle) => q && idle).pipe(
+      Stream.changes,
+      Stream.filter((ready) => ready),
+      Stream.runForEach(() => installQueued),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : logUpdaterError("Queued update install stopped.", {
+              cause: describeUpdateErrorCause(cause),
+            }),
+      ),
+      Effect.forkScoped,
+    );
+  });
+
   const startUpdatePollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
     yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(
       Effect.andThen(checkForUpdates("startup")),
@@ -1146,7 +1185,7 @@ export const make = Effect.gen(function* () {
     if (Option.isNone(activeAction)) {
       const checkedAt = yield* currentIsoTimestamp;
       yield* updateState((current) => ({
-        ...current,
+        ...withoutInstallWhenIdle(current),
         status: "error",
         message: error.message,
         checkedAt,
@@ -1241,13 +1280,7 @@ export const make = Effect.gen(function* () {
     isInstallActive: activeUpdateAction.pipe(
       Effect.map((action) => Option.isSome(action) && action.value === "install"),
     ),
-    subscribe: stateMutex.withPermits(1)(
-      Effect.gen(function* () {
-        const subscription = yield* PubSub.subscribe(stateChanges);
-        const latest = yield* Ref.get(updateStateRef);
-        return { latest, changes: Stream.fromSubscription(subscription) };
-      }),
-    ),
+    subscribe: subscribeState,
     emitState,
     disabledReason: Ref.get(updateStateRef).pipe(
       Effect.flatMap((state) => resolveStateDisabledReason(state.channel)),
@@ -1337,6 +1370,7 @@ export const make = Effect.gen(function* () {
       });
 
       yield* startUpdatePollers;
+      yield* installWhenAgentsIdle;
     }).pipe(Effect.withSpan("desktop.updates.configure")),
     setChannel: Effect.fn("desktop.updates.setChannel")(function* (
       nextChannel: DesktopUpdateChannel,
@@ -1435,6 +1469,17 @@ export const make = Effect.gen(function* () {
     ),
     installPrepared: Effect.fn("DesktopUpdates.installPrepared")(function (expectedVersion) {
       return installWithExpectedVersion(expectedVersion);
+    }),
+    setInstallWhenIdle: Effect.fn("desktop.updates.setInstallWhenIdle")(function* (queued) {
+      yield* Effect.annotateCurrentSpan({ queued });
+      const state = yield* updateState((current) =>
+        reduceDesktopUpdateStateOnInstallWhenIdle(current, queued),
+      );
+      yield* logUpdaterInfo("install when idle", {
+        requested: queued,
+        queued: state.installWhenIdle === true,
+      });
+      return state;
     }),
   });
 });

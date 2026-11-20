@@ -189,6 +189,10 @@ export class DesktopTelemetryReceiver extends Context.Service<
     ) => Effect.Effect<void, DesktopTelemetryControlError>;
     /** Tells the desktop parent that the server accepts requests, so it can skip readiness polling. */
     readonly announceServerReady: Effect.Effect<void, DesktopTelemetryControlError>;
+    /** Tells the desktop parent whether agents are busy, so a queued update restart waits. */
+    readonly reportAgentActivity: (
+      busy: boolean,
+    ) => Effect.Effect<void, DesktopTelemetryControlError>;
     readonly requestDesktopUpdate: (
       requestId: string,
       trackSwitch?: DesktopTrackSwitch,
@@ -722,6 +726,9 @@ export const make = Effect.fn("resourceTelemetry.desktopTelemetryReceiver.make")
     announceServerReady: sendControlMessage({ version: 1, type: "serverReady" }).pipe(
       Effect.withSpan("DesktopTelemetryReceiver.announceServerReady"),
     ),
+    reportAgentActivity: Effect.fn("DesktopTelemetryReceiver.reportAgentActivity")(function (busy) {
+      return sendControlMessage({ version: 1, type: "agentActivity", busy });
+    }),
     requestDesktopUpdate: Effect.fn("DesktopTelemetryReceiver.requestDesktopUpdate")(
       function (requestId, trackSwitch) {
         return sendControlMessage({
@@ -793,6 +800,9 @@ export const layerTest = (
         return Effect.void;
       }),
       announceServerReady: Effect.void,
+      reportAgentActivity: Effect.fn("DesktopTelemetryReceiver.reportAgentActivity")(function () {
+        return Effect.void;
+      }),
       requestDesktopUpdate: Effect.fn("DesktopTelemetryReceiver.requestDesktopUpdate")(function () {
         return Effect.void;
       }),

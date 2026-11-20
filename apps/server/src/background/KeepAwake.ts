@@ -55,6 +55,19 @@ function inhibitorCommand(
   }
 }
 
+/** Follows `wanted`, except a false waits out `grace` and a true inside it cancels the false. */
+export const withReleaseGrace = <E, R>(
+  wanted: Stream.Stream<boolean, E, R>,
+  grace: Duration.Input = RELEASE_GRACE,
+) =>
+  wanted.pipe(
+    Stream.changes,
+    Stream.switchMap((on) =>
+      on ? Stream.succeed(true) : Stream.fromEffect(Effect.as(Effect.sleep(grace), false)),
+    ),
+    Stream.changes,
+  );
+
 /**
  * Runs `hold` while `wanted` is true and for `grace` after it turns false; a true inside the
  * grace keeps the same hold. `hold` runs until interrupted.
@@ -64,12 +77,7 @@ export const holdWhileWanted = <E, R>(
   hold: Effect.Effect<void>,
   grace: Duration.Input = RELEASE_GRACE,
 ) =>
-  wanted.pipe(
-    Stream.changes,
-    Stream.switchMap((on) =>
-      on ? Stream.succeed(true) : Stream.fromEffect(Effect.as(Effect.sleep(grace), false)),
-    ),
-    Stream.changes,
+  withReleaseGrace(wanted, grace).pipe(
     Stream.switchMap((on) => (on ? Stream.fromEffect(hold) : Stream.empty)),
     Stream.runDrain,
   );
@@ -88,6 +96,38 @@ const retryWithBackoff =
       Effect.tapCause((cause) => Effect.logWarning(message, { cause })),
       Effect.retry(backoff),
     );
+
+/** Reads `read` now and again after every run event, so it follows run status changes. */
+export const readOnRunChanges = <A, E>(
+  events: OrchestrationEventStore.OrchestrationEventStore["Service"],
+  read: Effect.Effect<A, E>,
+  name: string,
+) =>
+  // Read the cursor before the snapshot so a run changing in between is replayed, not missed.
+  Stream.unwrap(
+    events.latestApplicationSequence.pipe(
+      retryWithBackoff(`${name} could not read the event cursor`),
+      Effect.map((afterSequence) =>
+        Stream.concat(
+          Stream.succeed(undefined),
+          events
+            .streamApplicationEvents({ afterSequence })
+            .pipe(
+              Stream.filter(
+                (stored) =>
+                  "event" in stored &&
+                  (stored.event.type === "run.created" || stored.event.type === "run.updated"),
+              ),
+            ),
+        ),
+      ),
+    ),
+  ).pipe(
+    Stream.mapEffect(() => read.pipe(retryWithBackoff(`${name} could not read runs`))),
+    // A failed subscription resubscribes, which re-reads the cursor and the snapshot.
+    Stream.tapCause((cause) => Effect.logWarning(`${name} run event stream failed`, { cause })),
+    Stream.retry(backoff),
+  );
 
 class KeepAwakeInhibitorExited extends Schema.TaggedError<KeepAwakeInhibitorExited>()(
   "KeepAwakeInhibitorExited",
@@ -108,37 +148,8 @@ export const layer = Layer.effectDiscard(
         SELECT 1 FROM orchestration_v2_projection_runs
         WHERE status IN ('preparing', 'starting', 'running')
       ) AS active
-    `.pipe(
-      Effect.map((rows) => rows[0]?.active === 1),
-      retryWithBackoff("keep-awake could not read active runs"),
-    );
-    // Read the cursor before the snapshot so a run changing in between is replayed, not missed.
-    const active = Stream.unwrap(
-      events.latestApplicationSequence.pipe(
-        retryWithBackoff("keep-awake could not read the event cursor"),
-        Effect.map((afterSequence) =>
-          Stream.concat(
-            Stream.succeed(undefined),
-            events
-              .streamApplicationEvents({ afterSequence })
-              .pipe(
-                Stream.filter(
-                  (stored) =>
-                    "event" in stored &&
-                    (stored.event.type === "run.created" || stored.event.type === "run.updated"),
-                ),
-              ),
-          ),
-        ),
-      ),
-    ).pipe(
-      Stream.mapEffect(() => hasActiveRun),
-      // A failed subscription resubscribes, which re-reads the cursor and the snapshot.
-      Stream.tapCause((cause) =>
-        Effect.logWarning("keep-awake run event stream failed", { cause }),
-      ),
-      Stream.retry(backoff),
-    );
+    `.pipe(Effect.map((rows) => rows[0]?.active === 1));
+    const active = readOnRunChanges(events, hasActiveRun, "keep-awake");
     const enabled = Stream.unwrap(
       Effect.gen(function* () {
         const changes = yield* settings.subscribeChanges;

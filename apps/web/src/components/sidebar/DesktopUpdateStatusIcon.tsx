@@ -1,5 +1,5 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
-import { CheckIcon, CircleArrowUpIcon, DownloadIcon, RotateCwIcon } from "lucide-react";
+import { CheckIcon, CircleArrowUpIcon, ClockIcon, DownloadIcon, RotateCwIcon } from "lucide-react";
 import type { AnimationEventHandler } from "react";
 
 const DOWNLOAD_PROGRESS_RADIUS = 14;
@@ -11,6 +11,7 @@ export type DesktopUpdateStatusIconState =
   | "available"
   | "downloading"
   | "downloaded"
+  | "queued"
   | "everything";
 
 function normalizeDesktopUpdateDownloadPercent(percent: number | null): number {
@@ -89,12 +90,13 @@ function DesktopUpdateDownloadingIcon({ percent }: { readonly percent: number | 
   );
 }
 
-function DesktopUpdateDownloadedIcon() {
+function DesktopUpdateDownloadedIcon({ queued }: { readonly queued: boolean }) {
+  const BadgeIcon = queued ? ClockIcon : CheckIcon;
   return (
     <span className="relative grid size-4 place-items-center">
       <RotateCwIcon className="size-4" />
       <span className="absolute -right-1 -bottom-1 grid size-2.5 place-items-center rounded-full bg-foreground text-background ring-2 ring-background">
-        <CheckIcon className="size-2" strokeWidth={3} />
+        <BadgeIcon className="size-2" strokeWidth={3} />
       </span>
     </span>
   );
@@ -115,7 +117,9 @@ export function DesktopUpdateStatusIcon({
   if (status === "downloading") {
     return <DesktopUpdateDownloadingIcon percent={downloadPercent ?? null} />;
   }
-  if (status === "downloaded") return <DesktopUpdateDownloadedIcon />;
+  if (status === "downloaded" || status === "queued") {
+    return <DesktopUpdateDownloadedIcon queued={status === "queued"} />;
+  }
   if (status === "everything") return <CircleArrowUpIcon className="size-4" />;
 
   return (
