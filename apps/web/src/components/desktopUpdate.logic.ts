@@ -32,7 +32,9 @@ export function getDesktopUpdateReleaseUrl(
 ): string | null {
   const normalizedVersion = version?.trim();
   if (!normalizedVersion) return null;
-  return `${desktopReleaseRepositoryUrl(repository)}/tag/v${encodeURIComponent(normalizedVersion)}`;
+  // Fork releases are tagged without the v, so upstream's release workflow ignores them.
+  const tag = /-fork\.\d+$/.test(normalizedVersion) ? normalizedVersion : `v${normalizedVersion}`;
+  return `${desktopReleaseRepositoryUrl(repository)}/tag/${encodeURIComponent(tag)}`;
 }
 
 export function getDesktopUpdateReleaseHistoryUrl(

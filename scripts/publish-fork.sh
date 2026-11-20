@@ -57,14 +57,63 @@ if [[ $previous == *-fork.* && $(print -l $previous $version | sort -V | tail -1
   exit 1
 fi
 
+tmp=$(mktemp -d)
+trap "rm -rf $tmp" EXIT
+
+# The app's update popover lists what sits above <details>, in the layout of upstream's notes.
+since=
+if [[ -n $previous ]]; then
+  since=$(gh release view $previous --repo $repo --json targetCommitish -q .targetCommitish 2>/dev/null || true)
+  git cat-file -e "$since^{commit}" 2>/dev/null || since=
+fi
+since_upstream=
+if [[ -n $since ]]; then
+  since_upstream=$(git tag --merged $since -l 'v*' --sort=-v:refname | grep -Em1 '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+fi
+fork_changes=()
+if [[ -n $since ]]; then
+  for commit in $(git rev-list --first-parent $since..HEAD); do
+    subject=$(git log -1 --format=%s $commit)
+    if [[ $subject =~ '^Merge pull request #([0-9]+) ' ]]; then
+      title=${$(git log -1 --format=%b $commit)%%$'\n'*}
+      fork_changes+=("- ${title:-$subject} (#$match[1])")
+    else
+      fork_changes+=("- $subject")
+    fi
+  done
+fi
+upstream_summary=
+if [[ $since_upstream != $upstream ]]; then
+  upstream_summary=$(gh release view $upstream --repo pingdotgg/t3code --json body -q .body 2>/dev/null |
+    awk '/^<details>/ { done = 1 } !done' || true)
+fi
+{
+  if (( ${#fork_changes} )); then
+    print "### Fork changes\n"
+    print -rl -- $fork_changes
+    print
+  fi
+  if [[ -n $upstream_summary ]]; then
+    print "### Upstream $upstream\n"
+    print -r -- $upstream_summary
+    print
+  elif (( ! ${#fork_changes} )); then
+    print -- "- Fork build of $sha.\n"
+  fi
+  print "<details>\n<summary>Full changelog</summary>\n"
+  git log --no-merges --format='- %s' ${since:+$since..}HEAD ^$upstream
+  if [[ $since_upstream != $upstream ]]; then
+    print "\nMerges upstream [$upstream](https://github.com/pingdotgg/t3code/releases/tag/$upstream)."
+  fi
+  print "\nBuilt from $sha.\n</details>"
+} > $tmp/notes.md
+
 rm -f release/*.yml(N) release/$zip release/$zip.blockmap
 
 # The rustup stable cargo is too old for the resource monitor; Homebrew cargo works.
 PATH="/opt/homebrew/bin:$PATH" T3CODE_DESKTOP_VERSION=$version T3CODE_DESKTOP_UPDATE_REPOSITORY=$repo CSC_NAME=${(U)leaf} \
   pnpm dist:desktop:dmg:arm64
 
-tmp=$(mktemp -d)
-trap "rm -rf $tmp" EXIT
 ditto -x -k release/$zip $tmp/unzipped
 app=($tmp/unzipped/*.app(N))
 if [[ ${#app} -ne 1 ]]; then
@@ -88,6 +137,6 @@ fi
 cp release/$zip $tmp/$asset
 
 gh release create $tag release/latest-mac.yml release/$zip release/$zip.blockmap $tmp/$asset \
-  --repo $repo --target "$(git rev-parse HEAD)" --title "T3 Code $version ($sha)" --notes "Fork build of $sha." --latest
+  --repo $repo --target "$(git rev-parse HEAD)" --title "T3 Code $version ($sha)" --notes-file $tmp/notes.md --latest
 
 print "Published $tag. Installed apps pick it up through their updater, and t3-update installs it on a new machine."
