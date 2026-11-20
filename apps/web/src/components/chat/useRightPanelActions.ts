@@ -131,9 +131,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   // Shows Changes of only these nested repositories, or of all of them when empty.
   const showChanges = (repositories: ReadonlyArray<string>) => {
     if (!activeThreadRef || !isServerThread || !canReviewChanges) return;
-    const diffOpen =
-      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
-    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
     useDiffPanelStore.getState().selectGitScope(activeThreadRef, "branch");
     useDiffPanelStore.getState().selectNestedRepositories(activeThreadRef, repositories);
     useRightPanelStore.getState().open(activeThreadRef, "diff");

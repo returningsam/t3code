@@ -79,7 +79,7 @@ name starts with `wt/`, and the checkout in `main/` gets a branch without the pr
 tracks it. Each worktree's folder is named after its branch,
 shortened if the name is long. Characters Git rejects in a custom name are replaced, and
 a name that is already taken gets a numeric suffix such as `-1`. If generation fails or
-takes longer than 30 seconds, the worktree gets a temporary branch name.
+takes longer than 20 seconds, the worktree gets a temporary branch name.
 
 ## Scheduled tasks on mobile
 

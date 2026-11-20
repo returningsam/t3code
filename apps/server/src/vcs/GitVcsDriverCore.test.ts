@@ -3437,7 +3437,8 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.include(diff, "+# tracked change");
         assert.include(diff, "+untracked contents");
         assert.notInclude(diff, "scaffold");
-        assert.include(diff, "diff --git a/committed b/committed");
+        // A nested repository with no edits of its own is left out of the review.
+        assert.notInclude(diff, "committed");
 
         const status = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
         assert.deepStrictEqual(status.branchChanges, {
@@ -4674,15 +4675,28 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           ]);
           const preview = yield* driver.getReviewDiffPreview({ cwd: root });
           const expected = [
-            { path: "main/README.md", previousPath: null, additions: 1, deletions: 1 },
+            {
+              path: "main/README.md",
+              previousPath: null,
+              changeType: "change",
+              additions: 1,
+              deletions: 1,
+            },
             {
               path: "worktrees/wt-a/GUIDE.md",
               previousPath: "worktrees/wt-a/README.md",
+              changeType: "rename-pure",
               additions: 0,
               deletions: 0,
             },
-            { path: "worktrees/wt-a/notes.txt", previousPath: null, additions: 1, deletions: 0 },
-          ];
+            {
+              path: "worktrees/wt-a/notes.txt",
+              previousPath: null,
+              changeType: "new",
+              additions: 1,
+              deletions: 0,
+            },
+          ] as const;
           for (const kind of ["working-tree", "branch-range"] as const) {
             assert.deepStrictEqual(sourceOf(preview, kind).files, expected);
           }
@@ -4749,8 +4763,20 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isTrue(source.truncated);
         assert.isAtMost(new TextEncoder().encode(source.diff).byteLength, 120_000);
         assert.deepStrictEqual(source.files, [
-          { path: "one/large.txt", previousPath: null, additions: 700, deletions: 0 },
-          { path: "two/large.txt", previousPath: null, additions: 700, deletions: 0 },
+          {
+            path: "one/large.txt",
+            previousPath: null,
+            changeType: "new",
+            additions: 700,
+            deletions: 0,
+          },
+          {
+            path: "two/large.txt",
+            previousPath: null,
+            changeType: "new",
+            additions: 700,
+            deletions: 0,
+          },
         ]);
       }),
     );
@@ -4777,7 +4803,13 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           const source = sourceOf(preview, kind);
           assert.isFalse(source.truncated);
           assert.deepStrictEqual(source.files, [
-            { path: "two/large.txt", previousPath: null, additions: 700, deletions: 0 },
+            {
+              path: "two/large.txt",
+              previousPath: null,
+              changeType: "new",
+              additions: 700,
+              deletions: 0,
+            },
           ]);
           assert.include(source.diff, "+++ b/two/large.txt");
           assert.notInclude(source.diff, "outside edit");
@@ -4812,9 +4844,27 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd: root }), "working-tree");
 
         assert.deepStrictEqual(source.files, [
-          { path: "c-added/new/notes.txt", previousPath: null, additions: 1, deletions: 0 },
-          { path: "d-deleted/README.md", previousPath: null, additions: 0, deletions: 1 },
-          { path: "a-edited/README.md", previousPath: null, additions: 1, deletions: 1 },
+          {
+            path: "c-added/new/notes.txt",
+            previousPath: null,
+            changeType: "new",
+            additions: 1,
+            deletions: 0,
+          },
+          {
+            path: "d-deleted/README.md",
+            previousPath: null,
+            changeType: "deleted",
+            additions: 0,
+            deletions: 1,
+          },
+          {
+            path: "a-edited/README.md",
+            previousPath: null,
+            changeType: "change",
+            additions: 1,
+            deletions: 1,
+          },
         ]);
         assert.isFalse(source.truncated);
         assert.isUndefined(source.nestedRepositories);
@@ -4957,8 +5007,20 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
         for (const source of preview.sources) {
           assert.deepStrictEqual(source.files, [
-            { path: "nested/README.md", previousPath: null, additions: 1, deletions: 1 },
-            { path: "nested/untracked.txt", previousPath: null, additions: 1, deletions: 0 },
+            {
+              path: "nested/README.md",
+              previousPath: null,
+              changeType: "change",
+              additions: 1,
+              deletions: 1,
+            },
+            {
+              path: "nested/untracked.txt",
+              previousPath: null,
+              changeType: "new",
+              additions: 1,
+              deletions: 0,
+            },
           ]);
           assert.include(source.diff, "+++ b/nested/untracked.txt");
           assert.notInclude(source.diff, "Subproject commit");
@@ -5028,10 +5090,28 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd }), "working-tree");
 
         const expected = [
-          { path: "README.md", previousPath: null, additions: 1, deletions: 1 },
-          { path: "sub/README.md", previousPath: null, additions: 1, deletions: 1 },
-          { path: "sub/added.txt", previousPath: null, additions: 1, deletions: 0 },
-        ];
+          {
+            path: "README.md",
+            previousPath: null,
+            changeType: "change",
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            path: "sub/README.md",
+            previousPath: null,
+            changeType: "change",
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            path: "sub/added.txt",
+            previousPath: null,
+            changeType: "new",
+            additions: 1,
+            deletions: 0,
+          },
+        ] as const;
         assert.deepStrictEqual(source.files, expected);
         assert.isTrue(source.diff.startsWith("diff --git a/README.md b/README.md"));
         assert.isAbove(source.diff.indexOf("diff --git a/sub/README.md"), 0);
@@ -5079,8 +5159,20 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
         const preview = yield* driver.getReviewDiffPreview({ cwd, baseRef: initialBranch });
 
-        const readme = { path: "sub/README.md", previousPath: null, additions: 1, deletions: 1 };
-        const feature = { path: "sub/feature.txt", previousPath: null, additions: 1, deletions: 0 };
+        const readme = {
+          path: "sub/README.md",
+          previousPath: null,
+          changeType: "change",
+          additions: 1,
+          deletions: 1,
+        } as const;
+        const feature = {
+          path: "sub/feature.txt",
+          previousPath: null,
+          changeType: "new",
+          additions: 1,
+          deletions: 0,
+        } as const;
         assert.deepStrictEqual(sourceOf(preview, "working-tree").files, [readme]);
         assert.deepStrictEqual(sourceOf(preview, "branch-range").files, [readme, feature]);
         const scoped = yield* driver.getReviewDiffPreview({
@@ -5117,7 +5209,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd }), "working-tree");
 
         assert.deepStrictEqual(source.files, [
-          { path: "sub", previousPath: null, additions: 1, deletions: 1 },
+          { path: "sub", previousPath: null, changeType: "change", additions: 1, deletions: 1 },
         ]);
         assert.include(source.diff, `-Subproject commit ${"1".repeat(40)}`);
       }),
@@ -5138,8 +5230,14 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const source = sourceOf(yield* driver.getReviewDiffPreview({ cwd }), "working-tree");
 
         assert.deepStrictEqual(source.files, [
-          { path: "vendor/lib", previousPath: null, additions: 1, deletions: 0 },
-          { path: "vendor/lib/a.c", previousPath: null, additions: 0, deletions: 1 },
+          { path: "vendor/lib", previousPath: null, changeType: "new", additions: 1, deletions: 0 },
+          {
+            path: "vendor/lib/a.c",
+            previousPath: null,
+            changeType: "deleted",
+            additions: 0,
+            deletions: 1,
+          },
         ]);
         assert.include(source.diff, "diff --git a/vendor/lib/a.c b/vendor/lib/a.c");
         assert.include(source.diff, "-int a;");
@@ -5201,8 +5299,14 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* writeTextFile(cwd, "fixtures/repo/a.txt", "two\n");
 
         const expected = [
-          { path: "fixtures/repo/a.txt", previousPath: null, additions: 1, deletions: 1 },
-        ];
+          {
+            path: "fixtures/repo/a.txt",
+            previousPath: null,
+            changeType: "change",
+            additions: 1,
+            deletions: 1,
+          },
+        ] as const;
         const listing = sourceOf(yield* driver.getReviewDiffPreview({ cwd }), "working-tree");
         assert.deepStrictEqual(listing.files, expected);
         const scoped = sourceOf(
