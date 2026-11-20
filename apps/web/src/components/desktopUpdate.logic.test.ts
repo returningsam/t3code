@@ -92,6 +92,12 @@ describe("desktop update UI helpers", () => {
       );
     },
   );
+
+  it("links a fork build to its tag, which has no v", () => {
+    expect(getDesktopUpdateReleaseUrl("0.1.10-fork.12080", "returningsam/t3code")).toBe(
+      "https://github.com/returningsam/t3code/releases/tag/0.1.10-fork.12080",
+    );
+  });
 });
 
 describe("canCheckForUpdate", () => {
