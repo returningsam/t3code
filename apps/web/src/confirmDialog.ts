@@ -1,5 +1,14 @@
 import type { ConfirmDialogOptions, ConfirmDialogVariant } from "@t3tools/contracts";
 
+export type ConfirmDialogChoice = "confirm" | "alternative" | "cancel";
+
+/** `alternative` adds a third button between Cancel and Confirm. */
+export interface ConfirmDialogLabels {
+  readonly confirm: string;
+  readonly cancel: string;
+  readonly alternative: string;
+}
+
 export type ConfirmDialogState =
   | { readonly status: "idle" }
   | {
@@ -7,19 +16,22 @@ export type ConfirmDialogState =
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
       readonly initialFocus: ConfirmDialogOptions["initialFocus"];
+      readonly labels: ConfirmDialogLabels | undefined;
     }
   | {
       readonly status: "closing";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
       readonly initialFocus: ConfirmDialogOptions["initialFocus"];
+      readonly labels: ConfirmDialogLabels | undefined;
     };
 
 type PendingConfirmation = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
   readonly initialFocus: ConfirmDialogOptions["initialFocus"];
-  readonly resolve: (confirmed: boolean) => void;
+  readonly labels: ConfirmDialogLabels | undefined;
+  readonly resolve: (choice: ConfirmDialogChoice) => void;
 };
 
 const idleState: ConfirmDialogState = { status: "idle" };
@@ -35,10 +47,10 @@ function publish(next: ConfirmDialogState): void {
   }
 }
 
-function resolvePendingConfirmations(confirmed: boolean): void {
-  activeConfirmation?.resolve(confirmed);
+function resolvePendingConfirmations(choice: ConfirmDialogChoice): void {
+  activeConfirmation?.resolve(choice);
   for (const confirmation of queuedConfirmations) {
-    confirmation.resolve(confirmed);
+    confirmation.resolve(choice);
   }
   activeConfirmation = null;
   queuedConfirmations = [];
@@ -56,7 +68,7 @@ export function subscribeConfirmDialogHost(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     if (!listeners.delete(listener) || listeners.size > 0) return;
-    resolvePendingConfirmations(false);
+    resolvePendingConfirmations("cancel");
     publish(idleState);
   };
 }
@@ -66,13 +78,22 @@ export function requestConfirmDialog(
   message: string,
   options?: ConfirmDialogOptions,
 ): Promise<boolean> | undefined {
+  return requestConfirmDialogChoice(message, options)?.then((choice) => choice === "confirm");
+}
+
+/** Undefined means no themed host is available. */
+export function requestConfirmDialogChoice(
+  message: string,
+  options?: ConfirmDialogOptions & { readonly labels?: ConfirmDialogLabels },
+): Promise<ConfirmDialogChoice> | undefined {
   if (listeners.size === 0) return undefined;
 
-  const confirmation = new Promise<boolean>((resolve) => {
+  const confirmation = new Promise<ConfirmDialogChoice>((resolve) => {
     const pending = {
       message,
       variant: options?.variant ?? "default",
       initialFocus: options?.initialFocus,
+      labels: options?.labels,
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {
@@ -86,6 +107,7 @@ export function requestConfirmDialog(
       message,
       variant: pending.variant,
       initialFocus: pending.initialFocus,
+      labels: pending.labels,
     });
   });
 
@@ -96,17 +118,18 @@ export function isConfirmDialogActive(): boolean {
   return state.status !== "idle" || activeConfirmation !== null || queuedConfirmations.length > 0;
 }
 
-export function respondToConfirmDialog(confirmed: boolean): void {
+export function respondToConfirmDialog(choice: ConfirmDialogChoice): void {
   if (state.status !== "confirming" || !activeConfirmation) return;
 
   const confirmation = activeConfirmation;
   activeConfirmation = null;
-  confirmation.resolve(confirmed);
+  confirmation.resolve(choice);
   publish({
     status: "closing",
     message: state.message,
     variant: state.variant,
     initialFocus: state.initialFocus,
+    labels: state.labels,
   });
 }
 
@@ -125,11 +148,12 @@ export function completeConfirmDialogClose(): void {
     message: next.message,
     variant: next.variant,
     initialFocus: next.initialFocus,
+    labels: next.labels,
   });
 }
 
 export function resetConfirmDialogForTests(): void {
   listeners.clear();
-  resolvePendingConfirmations(false);
+  resolvePendingConfirmations("cancel");
   publish(idleState);
 }

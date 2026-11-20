@@ -99,16 +99,21 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
       buttons: ["OK"],
     });
   } else if (updateState.status === "downloaded") {
+    const queued = updateState.installWhenIdle === true;
     const { response } = yield* electronDialog.showMessageBox({
       type: "info",
       title: "Update ready",
       message: `${describeUpdate(updateState.downloadedVersion ?? updateState.availableVersion)} is ready to install.`,
-      detail: "T3 Code will restart to install it. Any running tasks will be interrupted.",
-      buttons: ["Restart", "Later"],
-      defaultId: 0,
-      cancelId: 1,
+      detail: queued
+        ? "T3 Code will restart once no agent is working or waiting for you. Restart interrupts any running tasks."
+        : "Restart interrupts any running tasks. Restart When Idle waits until no agent is working or waiting for you.",
+      buttons: ["Restart", queued ? "Cancel Queued Restart" : "Restart When Idle", "Later"],
+      // Enter must not interrupt running agents.
+      defaultId: 2,
+      cancelId: 2,
     });
     if (response === 0) yield* updates.install;
+    if (response === 1) yield* updates.setInstallWhenIdle(!queued);
   } else if (updateState.status === "error") {
     yield* electronDialog.showMessageBox({
       type: "warning",

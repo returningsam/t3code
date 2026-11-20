@@ -393,8 +393,17 @@ export const DesktopTelemetryServerReady = Schema.Struct({
 });
 export type DesktopTelemetryServerReady = typeof DesktopTelemetryServerReady.Type;
 
+/** Busy while a run works, waits on the user, or a queued message can start one; idle lags by a grace. */
+export const DesktopTelemetryAgentActivity = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("agentActivity"),
+  busy: Schema.Boolean,
+});
+export type DesktopTelemetryAgentActivity = typeof DesktopTelemetryAgentActivity.Type;
+
 export const DesktopTelemetryControlMessage = Schema.Union([
   DesktopTelemetryServerReady,
+  DesktopTelemetryAgentActivity,
   DesktopTelemetrySetDiagnosticsDemand,
   DesktopTelemetrySetHostPowerIntervals,
   DesktopTelemetryRequestDesktopUpdate,

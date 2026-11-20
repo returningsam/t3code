@@ -6,6 +6,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
@@ -15,6 +17,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
@@ -44,6 +47,8 @@ export interface UpdatesHarnessOptions {
   readonly savedChannel?: DesktopAppSettings.DesktopSettings["updateChannel"];
   /** Adds a WSL backend beside the primary, as on a Windows host with WSL enabled. */
   readonly wslBackend?: boolean;
+  /** Whether this machine's agents start idle; `setAgentsIdle` changes it. */
+  readonly agentsIdle?: boolean;
 }
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
@@ -290,8 +295,15 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       }),
   });
 
+  const agentsIdle = Effect.runSync(SubscriptionRef.make(options.agentsIdle ?? true));
+  const layerTelemetryPublisher = Layer.mock(DesktopTelemetryPublisher.DesktopTelemetryPublisher, {
+    agentsIdle: SubscriptionRef.changes(agentsIdle).pipe(Stream.changes),
+    agentsIdleNow: SubscriptionRef.get(agentsIdle),
+  });
+
   const layer = DesktopUpdates.layer.pipe(
     Layer.provide(layerFileSystem),
+    Layer.provide(layerTelemetryPublisher),
     Layer.provide(DesktopUpdatePolicy.layerTest(options.policy)),
     Layer.provideMerge(layerUpdater),
     Layer.provideMerge(layerWindow),
@@ -333,6 +345,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
         0,
       ),
     sentStates,
+    setAgentsIdle: (idle: boolean) => SubscriptionRef.set(agentsIdle, idle),
     emit: (eventName: string, payload?: unknown) => {
       for (const listener of listeners.get(eventName) ?? []) {
         listener(payload);

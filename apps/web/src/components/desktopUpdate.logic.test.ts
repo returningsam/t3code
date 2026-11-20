@@ -7,6 +7,7 @@ import {
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateReleaseUrl,
   resolveDesktopUpdateButtonAction,
+  resolveDesktopUpdateInstallAction,
 } from "./desktopUpdate.logic";
 
 const baseState: DesktopUpdateState = {
@@ -110,5 +111,18 @@ describe("canCheckForUpdate", () => {
         downloadedVersion: "1.1.0",
       }),
     ).toBe(true);
+  });
+});
+
+describe("resolveDesktopUpdateInstallAction", () => {
+  it("reads the middle button as queue or cancel, matching the dialog that state showed", () => {
+    expect(resolveDesktopUpdateInstallAction({}, "alternative")).toBe("restart-when-idle");
+    expect(resolveDesktopUpdateInstallAction({ installWhenIdle: true }, "alternative")).toBe(
+      "cancel-queued-restart",
+    );
+    expect(resolveDesktopUpdateInstallAction({ installWhenIdle: true }, "confirm")).toBe(
+      "restart-now",
+    );
+    expect(resolveDesktopUpdateInstallAction({ installWhenIdle: true }, "cancel")).toBeNull();
   });
 });

@@ -2,9 +2,14 @@ import { createRef } from "react";
 import { describe, expect, it } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
-import { requestConfirmDialog, resetConfirmDialogForTests } from "~/confirmDialog";
+import {
+  type ConfirmDialogChoice,
+  requestConfirmDialogChoice,
+  resetConfirmDialogForTests,
+} from "~/confirmDialog";
 import { act, render } from "../../../test/render";
 import { ConfirmDialogHost } from "../ConfirmDialogHost";
+import { getDesktopUpdateInstallDialog } from "../desktopUpdate.logic";
 import { Button } from "./button";
 import {
   Dialog,
@@ -15,29 +20,53 @@ import {
   DialogTrigger,
 } from "./dialog";
 
+const updateInstallDialog = (installWhenIdle: boolean) =>
+  getDesktopUpdateInstallDialog({
+    availableVersion: "1.2.3",
+    downloadedVersion: "1.2.3",
+    ...(installWhenIdle ? { installWhenIdle: true } : {}),
+  }).options;
+
 describe("dialog initial focus", () => {
   it.each([
-    { label: "generic", options: undefined, focused: "Cancel", confirmed: false },
+    { label: "generic", options: undefined, focused: "Cancel", choice: "cancel" },
     {
       label: "destructive opt-in",
       options: { variant: "destructive", initialFocus: "confirm" },
       focused: "Cancel",
-      confirmed: false,
+      choice: "cancel",
     },
-    { label: "opt-in", options: { initialFocus: "confirm" }, focused: "Confirm", confirmed: true },
+    {
+      label: "opt-in",
+      options: { initialFocus: "confirm" },
+      focused: "Confirm",
+      choice: "confirm",
+    },
+    {
+      label: "restart update",
+      options: updateInstallDialog(false),
+      focused: "Cancel",
+      choice: "cancel",
+    },
+    {
+      label: "queued restart",
+      options: updateInstallDialog(true),
+      focused: "Keep waiting",
+      choice: "cancel",
+    },
   ] as const)(
     "focuses $focused for a $label confirmation",
-    async ({ options, focused, confirmed }) => {
+    async ({ options, focused, choice }) => {
       resetConfirmDialogForTests();
       await using _screen = await render(<ConfirmDialogHost />);
-      let confirmation: Promise<boolean> | undefined;
+      let confirmation: Promise<ConfirmDialogChoice> | undefined;
       await act(() => {
-        confirmation = requestConfirmDialog("Continue?", options);
+        confirmation = requestConfirmDialogChoice("Continue?", options);
       });
 
       await expect.element(page.getByRole("button", { name: focused, exact: true })).toHaveFocus();
       await userEvent.keyboard("{Enter}");
-      await expect(confirmation).resolves.toBe(confirmed);
+      await expect(confirmation).resolves.toBe(choice);
     },
   );
 
