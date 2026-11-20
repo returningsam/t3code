@@ -872,6 +872,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   text: rewriteAgySkillMentions(
                     turnInput.message.text,
                     new Set(skills.map((skill) => skill.name)),
+                    turnInput.inlineContextLength,
                   ),
                   attachments: turnInput.message.attachments,
                   resolveAttachmentPath: host.resolveAttachmentPath,

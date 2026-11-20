@@ -79,4 +79,16 @@ describe("rewriteAgySkillMentions", () => {
       "/herd-review /unslop then /herd-review and /unslop",
     );
   });
+
+  it("leaves skills in inline handoff history alone", () => {
+    const context = "Earlier: $unslop the docs\n\nUser message:\n";
+    assert.equal(
+      rewriteAgySkillMentions(`${context}fix the bug`, skills, context.length),
+      `${context}fix the bug`,
+    );
+    assert.equal(
+      rewriteAgySkillMentions(`${context}/wt:pr fix it with $herd-review`, skills, context.length),
+      `/herd-review /wt:pr ${context}fix it with /herd-review`,
+    );
+  });
 });
