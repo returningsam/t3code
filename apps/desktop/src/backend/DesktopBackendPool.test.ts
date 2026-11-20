@@ -182,6 +182,7 @@ function layerPool(
           updateCommits: Stream.empty,
           updateCancellations: Stream.empty,
           agentsIdle: Stream.empty,
+          agentsIdleNow: Effect.succeed(true),
         }),
         DesktopBrowserHost.layer,
         Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {

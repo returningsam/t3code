@@ -298,6 +298,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   const agentsIdle = Effect.runSync(SubscriptionRef.make(options.agentsIdle ?? true));
   const layerTelemetryPublisher = Layer.mock(DesktopTelemetryPublisher.DesktopTelemetryPublisher, {
     agentsIdle: SubscriptionRef.changes(agentsIdle).pipe(Stream.changes),
+    agentsIdleNow: SubscriptionRef.get(agentsIdle),
   });
 
   const layer = DesktopUpdates.layer.pipe(

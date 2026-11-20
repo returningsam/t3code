@@ -212,13 +212,18 @@ export async function setLocalUpdateInstallWhenIdle(
   queued: boolean,
   reportError: ReportLocalUpdateError = toastUpdateError,
 ): Promise<void> {
+  const title = queued ? "Could not queue the restart" : "Could not cancel the queued restart";
+  if (typeof bridge.setInstallWhenIdle !== "function") {
+    reportError(title, "This version of the desktop app cannot restart when idle.");
+    return;
+  }
   try {
-    await bridge.setInstallWhenIdle(queued);
+    const state = await bridge.setInstallWhenIdle(queued);
+    if (queued && !state.installWhenIdle) {
+      reportError(title, "The update is no longer ready to install.");
+    }
   } catch (error) {
-    reportError(
-      queued ? "Could not queue the restart" : "Could not cancel the queued restart",
-      error instanceof Error ? error.message : "An unexpected error occurred.",
-    );
+    reportError(title, error instanceof Error ? error.message : "An unexpected error occurred.");
   }
 }
 

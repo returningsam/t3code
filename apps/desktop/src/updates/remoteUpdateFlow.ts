@@ -1,5 +1,7 @@
 import type { DesktopUpdateRemoteOutcome, DesktopUpdateState } from "@t3tools/contracts";
 
+import { hasInstallableDownload } from "./updateMachine.ts";
+
 export type RemoteDesktopUpdateStep =
   | { readonly action: "check" }
   | { readonly action: "download" }
@@ -19,15 +21,6 @@ export interface RemoteDesktopUpdateAttempts {
 
 const MAX_REMOTE_UPDATE_CHECKS = 2;
 export const MAX_REMOTE_UPDATE_DOWNLOADS = 3;
-
-function isInstallableDesktopUpdateState(state: DesktopUpdateState): boolean {
-  return (
-    state.downloadedVersion !== null &&
-    (state.status === "downloaded" ||
-      (state.status === "error" &&
-        (state.errorContext === null || state.errorContext === "install")))
-  );
-}
 
 export function nextRemoteDesktopUpdateStep(
   state: DesktopUpdateState,
@@ -53,7 +46,7 @@ export function nextRemoteDesktopUpdateStep(
     };
   }
   // Match install admission, including retained downloads after unrelated background or earlier install errors.
-  if (isInstallableDesktopUpdateState(state)) {
+  if (hasInstallableDownload(state)) {
     return { action: "install" };
   }
   if (state.status === "downloading" || state.status === "checking") {

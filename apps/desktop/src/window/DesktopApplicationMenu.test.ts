@@ -367,8 +367,9 @@ describe("DesktopApplicationMenu", () => {
         downloadPercent: 100,
       });
       assert.include(`${dialog.title ?? ""} ${dialog.message} ${dialog.detail ?? ""}`, "0.1.7");
-      // Escape must neither restart nor queue a restart.
+      // Neither Enter nor Escape may restart or queue a restart.
       assert.equal(dialog.buttons?.[dialog.cancelId ?? 0], "Later");
+      assert.equal(dialog.buttons?.[dialog.defaultId ?? 0], "Later");
     }),
   );
 });

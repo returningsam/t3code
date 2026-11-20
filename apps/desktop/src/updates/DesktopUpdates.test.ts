@@ -314,6 +314,60 @@ describe("DesktopUpdates", () => {
     }),
   );
 
+  it.effect(
+    "queues a newer download found by the queued install and waits while agents start",
+    () =>
+      Effect.gen(function* () {
+        const downloadStarted = yield* Deferred.make<void>();
+        const releaseDownload = yield* Deferred.make<void>();
+        const installed = yield* Deferred.make<void>();
+        const harness = makeHarness({
+          agentsIdle: false,
+          checkForUpdates: Effect.sync(() =>
+            harness.emit("update-available", { version: "1.2.5" }),
+          ),
+          downloadUpdate: Deferred.succeed(downloadStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseDownload)),
+            Effect.andThen(
+              Effect.sync(() => harness.emit("update-downloaded", { version: "1.2.5" })),
+            ),
+          ),
+          quitAndInstall: Deferred.succeed(installed, undefined).pipe(Effect.asVoid),
+        });
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const updates = yield* DesktopUpdates.DesktopUpdates;
+            yield* updates.configure;
+            harness.emit("update-downloaded", { version: "1.2.4" });
+            yield* flushCallbacks;
+            const { changes } = yield* updates.subscribe;
+            const requeued = yield* changes.pipe(
+              Stream.filter(
+                (state) => state.downloadedVersion === "1.2.5" && !!state.installWhenIdle,
+              ),
+              Stream.runHead,
+              Effect.forkScoped,
+            );
+
+            yield* updates.setInstallWhenIdle(true);
+            yield* harness.setAgentsIdle(true);
+            yield* Deferred.await(downloadStarted);
+            yield* harness.setAgentsIdle(false);
+            yield* Deferred.succeed(releaseDownload, undefined);
+            yield* Fiber.join(requeued);
+            yield* flushCallbacks;
+            assert.equal(harness.quitAndInstalls(), 0);
+
+            yield* harness.setAgentsIdle(true);
+            yield* Deferred.await(installed);
+            assert.equal(harness.installRecords.size, 1);
+            assert.include([...harness.installRecords.values()][0], "1.2.5");
+          }),
+        ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+      }),
+  );
+
   it.effect.each([
     { action: "download", offer: "update-available", found: null, accepted: true },
     { action: "install", offer: "update-downloaded", found: null, accepted: true },

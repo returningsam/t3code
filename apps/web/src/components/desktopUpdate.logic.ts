@@ -164,7 +164,6 @@ export function getDesktopUpdateInstallDialog(
     : {
         message: `Install ${update} and restart T3 Code?\n\nRestart now interrupts any running tasks. Restart when idle waits until no agent is working or waiting for you.`,
         options: {
-          initialFocus: "confirm",
           labels: { confirm: "Restart now", cancel: "Cancel", alternative: "Restart when idle" },
         },
       };

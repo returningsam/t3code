@@ -134,10 +134,10 @@ describe("DesktopTelemetryPublisher", () => {
 
       assert.isTrue(yield* idle);
       yield* report("primary", true);
-      yield* report("wsl:Ubuntu", true);
+      yield* report("secondary", true);
       yield* report("primary", false);
       assert.isFalse(yield* idle);
-      yield* publisher.removeControlSource("wsl:Ubuntu");
+      yield* publisher.removeControlSource("secondary");
       assert.isTrue(yield* idle);
     }).pipe(
       Effect.provide(

@@ -108,7 +108,8 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
         ? "T3 Code will restart once no agent is working or waiting for you. Restart interrupts any running tasks."
         : "Restart interrupts any running tasks. Restart When Idle waits until no agent is working or waiting for you.",
       buttons: ["Restart", queued ? "Cancel Queued Restart" : "Restart When Idle", "Later"],
-      defaultId: 0,
+      // Enter must not interrupt running agents.
+      defaultId: 2,
       cancelId: 2,
     });
     if (response === 0) yield* updates.install;

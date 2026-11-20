@@ -77,6 +77,7 @@ export class DesktopTelemetryPublisher extends Context.Service<
     readonly updateCancellations: Stream.Stream<DesktopTelemetryCancelDesktopUpdate>;
     /** True while no backend reports busy agents; a backend that never reports counts as idle. */
     readonly agentsIdle: Stream.Stream<boolean>;
+    readonly agentsIdleNow: Effect.Effect<boolean>;
   }
 >()("@t3tools/desktop/telemetry/DesktopTelemetryPublisher") {}
 
@@ -443,6 +444,9 @@ export const make = Effect.fn("desktop.telemetryPublisher.make")(function* () {
     agentsIdle: SubscriptionRef.changes(busyAgentSources).pipe(
       Stream.map((sources) => sources.size === 0),
       Stream.changes,
+    ),
+    agentsIdleNow: SubscriptionRef.get(busyAgentSources).pipe(
+      Effect.map((sources) => sources.size === 0),
     ),
   });
 });

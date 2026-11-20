@@ -55,6 +55,8 @@ function inhibitorCommand(
   }
 }
 
+export const RUN_EVENTS: ReadonlySet<string> = new Set(["run.created", "run.updated"]);
+
 /** Follows `wanted`, except a false waits out `grace` and a true inside it cancels the false. */
 export const withReleaseGrace = <E, R>(
   wanted: Stream.Stream<boolean, E, R>,
@@ -97,9 +99,10 @@ const retryWithBackoff =
       Effect.retry(backoff),
     );
 
-/** Reads `read` now and again after every run event, so it follows run status changes. */
-export const readOnRunChanges = <A, E>(
+/** Reads `read` now and again after each event of `eventTypes`, so it follows what they change. */
+export const readOnEvents = <A, E>(
   events: OrchestrationEventStore.OrchestrationEventStore["Service"],
+  eventTypes: ReadonlySet<string>,
   read: Effect.Effect<A, E>,
   name: string,
 ) =>
@@ -113,11 +116,7 @@ export const readOnRunChanges = <A, E>(
           events
             .streamApplicationEvents({ afterSequence })
             .pipe(
-              Stream.filter(
-                (stored) =>
-                  "event" in stored &&
-                  (stored.event.type === "run.created" || stored.event.type === "run.updated"),
-              ),
+              Stream.filter((stored) => "event" in stored && eventTypes.has(stored.event.type)),
             ),
         ),
       ),
@@ -149,7 +148,7 @@ export const layer = Layer.effectDiscard(
         WHERE status IN ('preparing', 'starting', 'running')
       ) AS active
     `.pipe(Effect.map((rows) => rows[0]?.active === 1));
-    const active = readOnRunChanges(events, hasActiveRun, "keep-awake");
+    const active = readOnEvents(events, RUN_EVENTS, hasActiveRun, "keep-awake");
     const enabled = Stream.unwrap(
       Effect.gen(function* () {
         const changes = yield* settings.subscribeChanges;

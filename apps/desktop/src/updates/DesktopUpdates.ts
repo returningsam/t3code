@@ -402,6 +402,8 @@ export const make = Effect.gen(function* () {
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const notAppliedVersionRef = yield* Ref.make(Option.none<string>());
+  // The user's latest choice; the state's flag also drops when an offer replaces the download.
+  const installWhenIdleRequestedRef = yield* Ref.make(false);
   // The release a track switch's database check cleared. A build crosses to another track only
   // through such a switch, and never below that release: version order alone cannot tell whether
   // a Stable knows a Nightly's migrations.
@@ -982,6 +984,7 @@ export const make = Effect.gen(function* () {
 
   const installWithExpectedVersion = Effect.fn("desktop.updates.install")(function* (
     expectedVersion?: string,
+    queued = false,
   ) {
     if (yield* Ref.get(desktopState.quitting)) {
       return {
@@ -1010,7 +1013,11 @@ export const make = Effect.gen(function* () {
         refreshed.availableVersion === null ||
         compareSemverVersions(refreshed.availableVersion, retained.downloadedVersion) <= 0
       ) {
-        yield* setState(retained);
+        yield* setState(
+          (yield* Ref.get(installWhenIdleRequestedRef))
+            ? retained
+            : withoutInstallWhenIdle(retained),
+        );
       } else {
         const download = yield* downloadAvailableUpdate(false);
         if (!download.completed) {
@@ -1021,10 +1028,26 @@ export const make = Effect.gen(function* () {
             state: yield* Ref.get(updateStateRef),
           };
         }
+        if (queued && (yield* Ref.get(installWhenIdleRequestedRef))) {
+          yield* updateState((state) => reduceDesktopUpdateStateOnInstallWhenIdle(state, true));
+        }
         if (expectedVersion !== undefined) {
           installVersion = (yield* Ref.get(updateStateRef)).downloadedVersion ?? expectedVersion;
         }
       }
+    }
+    // The refresh can outlast a cancel or the idle spell; a busy deferral keeps the queue.
+    if (
+      queued &&
+      (!(yield* Ref.get(updateStateRef)).installWhenIdle ||
+        !(yield* telemetryPublisher.agentsIdleNow))
+    ) {
+      return {
+        accepted: true,
+        completed: false,
+        failed: false,
+        state: yield* Ref.get(updateStateRef),
+      };
     }
     const result = yield* installDownloadedUpdate(installVersion);
     return {
@@ -1037,10 +1060,19 @@ export const make = Effect.gen(function* () {
 
   const installQueued = Effect.gen(function* () {
     yield* logUpdaterInfo("agents are idle; installing the queued update");
-    const result = yield* installWithExpectedVersion();
+    const result = yield* installWithExpectedVersion(undefined, true);
     // Nothing would retry a refused install, so the queued label would stay on screen.
     if (!result.accepted) yield* updateState(withoutInstallWhenIdle);
-  }).pipe(Effect.withSpan("desktop.updates.installQueued"));
+  }).pipe(
+    Effect.catchCauseIf(
+      (cause) => !Cause.hasInterruptsOnly(cause),
+      (cause) =>
+        logUpdaterError("Queued update install failed unexpectedly.", {
+          cause: describeUpdateErrorCause(cause),
+        }).pipe(Effect.andThen(updateState(withoutInstallWhenIdle))),
+    ),
+    Effect.withSpan("desktop.updates.installQueued"),
+  );
 
   const installWhenAgentsIdle: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
     const { latest, changes } = yield* subscribeState;
@@ -1051,13 +1083,6 @@ export const make = Effect.gen(function* () {
       Stream.changes,
       Stream.filter((ready) => ready),
       Stream.runForEach(() => installQueued),
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.void
-          : logUpdaterError("Queued update install stopped.", {
-              cause: describeUpdateErrorCause(cause),
-            }),
-      ),
       Effect.forkScoped,
     );
   });
@@ -1472,6 +1497,7 @@ export const make = Effect.gen(function* () {
     }),
     setInstallWhenIdle: Effect.fn("desktop.updates.setInstallWhenIdle")(function* (queued) {
       yield* Effect.annotateCurrentSpan({ queued });
+      yield* Ref.set(installWhenIdleRequestedRef, queued);
       const state = yield* updateState((current) =>
         reduceDesktopUpdateStateOnInstallWhenIdle(current, queued),
       );
