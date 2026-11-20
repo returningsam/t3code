@@ -65,4 +65,4 @@ Full docs live in [docs/](./docs). They describe upstream T3 Code and apply to t
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
 - [Run T3 Code as a background service](./docs/user/background-service.md)
 
-For build internals, start at [docs/internals/overview.md](./docs/internals/overview.md).
+[All docs](./docs/README.md) has the full list. For build internals, start at [docs/internals/overview.md](./docs/internals/overview.md).
