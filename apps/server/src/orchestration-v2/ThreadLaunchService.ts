@@ -698,11 +698,13 @@ const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => null),
           );
           if (settings?.branchNamingMode === "static") {
-            branch = formatGeneratedBranchName(branch.slice(-8), {
+            const prefixed = formatGeneratedBranchName(branch.slice(-8), {
               mode: "static",
               prefix: settings.branchNamePrefix,
               instructions: "",
             });
+            // An emptied prefix (the old `t3` default) keeps the recognizable wt/<hex> name.
+            if (prefixed.includes("/")) branch = prefixed;
           }
         }
         if (generatedBranch === null && (temporaryBranch || isTemporaryWorktreeBranch(branch))) {

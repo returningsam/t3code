@@ -118,12 +118,21 @@ export const discoverAgySkills = Effect.fn("discoverAgySkills")(function* (
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
 });
 
-/**
- * agy expands only the `/name` tokens that open a prompt, and treats `$name`
- * as prose. Rewrite each mention of a known skill to `/name` and put any that
- * do not already open the prompt in front, so agy loads them all.
- */
-export function rewriteAgySkillMentions(prompt: string, skillNames: ReadonlySet<string>): string {
+// agy expands only the `/name` tokens that open a prompt, so known `$name` mentions become
+// leading `/name` commands. Text before `mentionsFrom` is handoff history and stays as is.
+export function rewriteAgySkillMentions(
+  prompt: string,
+  skillNames: ReadonlySet<string>,
+  mentionsFrom = 0,
+): string {
+  if (mentionsFrom > 0) {
+    const user = rewriteAgySkillMentions(prompt.slice(mentionsFrom), skillNames);
+    const leading = LEADING_COMMANDS_PATTERN.exec(user)?.[0] ?? "";
+    const context = prompt.slice(0, mentionsFrom);
+    return leading === ""
+      ? `${context}${user}`
+      : `${leading.trimEnd()} ${context}${user.slice(leading.length)}`;
+  }
   const mentioned: string[] = [];
   const rewritten = prompt.replace(SKILL_MENTION_PATTERN, (match, prefix: string, name: string) => {
     if (!skillNames.has(name)) return match;

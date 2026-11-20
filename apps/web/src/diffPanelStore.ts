@@ -29,7 +29,7 @@ interface DiffPanelStoreState {
   branchBaseRefByThreadKey: Record<string, string | null>;
   /**
    * For a folder of repositories, the ones its Changes view shows. Absent shows them all. Not
-   * persisted: every generic opening of Changes shows them all again.
+   * persisted, and opening Changes from its row shows them all again.
    */
   nestedRepositoriesByThreadKey: Record<string, ReadonlyArray<string>>;
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;

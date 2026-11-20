@@ -1047,6 +1047,7 @@ it.effect.each([
   { prefix: "my-prefix", collision: null, expected: /^my-prefix\/[0-9a-f]{8}$/ },
   { prefix: "my-prefix", collision: "my-prefix", expected: /^my-prefix-[0-9a-f]{8}$/ },
   { prefix: "team/topic", collision: "team", expected: /^team-topic-[0-9a-f]{8}$/ },
+  { prefix: "t3", collision: null, expected: /^wt\/[0-9a-f]{8}$/ },
 ])("keeps prefix '$prefix' with collision '$collision' when naming fails", (scenario) =>
   Effect.gen(function* () {
     const namingAttempted = yield* Deferred.make<void>();
