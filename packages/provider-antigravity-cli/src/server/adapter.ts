@@ -86,6 +86,7 @@ const AntigravityCliCapabilitiesV2 = {
     supportsActiveSteering: false,
     supportsSteeringByInterruptRestart: false,
     supportsQueuedMessages: true,
+    supportsNativeResume: false,
     terminalStatusQuality: "strong",
   },
   streaming: {
