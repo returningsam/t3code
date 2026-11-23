@@ -3,8 +3,12 @@ import type {
   DesktopUpdateActionResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
+import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
+import { msg } from "gt-react";
 
 import type { ConfirmDialogChoice, ConfirmDialogLabels } from "../confirmDialog";
+import { m, type MessageResolver } from "../i18n/messages";
+import { channelSwitchLabel } from "./sidebar/updateEverything.logic";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
@@ -13,7 +17,7 @@ export type DesktopUpdateInstallAction =
   | "restart-when-idle"
   | "cancel-queued-restart";
 
-export const DESKTOP_UPDATE_RESTART_QUEUED = "Restart queued until agents finish.";
+export const DESKTOP_UPDATE_RESTART_QUEUED = msg("Restart queued until agents finish.");
 
 const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
 const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
@@ -86,87 +90,167 @@ export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null):
   return state?.status === "downloading";
 }
 
-export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
+export function getArm64IntelBuildWarningDescription(
+  state: DesktopUpdateState,
+  resolve: MessageResolver = m,
+): string {
   if (!shouldShowArm64IntelBuildWarning(state)) {
-    return "This install is using the correct architecture.";
+    return resolve(msg("This install is using the correct architecture."));
   }
 
   const action = resolveDesktopUpdateButtonAction(state);
   if (action === "download") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
+    return resolve(
+      msg(
+        "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.",
+      ),
+    );
   }
   if (action === "install") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+    return resolve(
+      msg(
+        "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.",
+      ),
+    );
   }
-  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return resolve(
+    msg(
+      "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.",
+    ),
+  );
 }
 
-export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
+export function getDesktopUpdateButtonTooltip(
+  state: DesktopUpdateState,
+  resolve: MessageResolver = m,
+): string {
   if (state.installWhenIdle) {
-    return `Restart queued for update ${state.downloadedVersion} until agents finish. Click to restart now or cancel.`;
+    return resolve(
+      msg(
+        "Restart queued for update {version} until agents finish. Click to restart now or cancel.",
+        { version: state.downloadedVersion },
+      ),
+    );
   }
   if (
     state.notAppliedVersion !== undefined &&
     (state.status === "available" || state.status === "downloaded") &&
     getDesktopUpdateDownloadedVersion(state) === state.notAppliedVersion
   ) {
-    return `Update ${state.notAppliedVersion} did not apply. Click to retry.`;
+    return resolve(
+      msg("Update {version} did not apply. Click to retry.", { version: state.notAppliedVersion }),
+    );
   }
   if (
     (state.status === "available" || state.status === "error") &&
     state.errorContext === "download" &&
     state.availableVersion
   ) {
-    return `Download failed for ${state.availableVersion}. Click to retry.`;
+    return resolve(
+      msg("Download failed for {version}. Click to retry.", { version: state.availableVersion }),
+    );
   }
   if (state.status === "available") {
-    return `Update ${state.availableVersion ?? "available"} ready to download`;
+    return state.availableVersion === null
+      ? resolve(msg("Update available ready to download"))
+      : resolve(msg("Update {version} ready to download", { version: state.availableVersion }));
   }
   if (state.status === "downloading") {
-    const progress =
-      typeof state.downloadPercent === "number" ? ` (${Math.floor(state.downloadPercent)}%)` : "";
-    return `Downloading update${progress}`;
+    return typeof state.downloadPercent === "number"
+      ? resolve(
+          msg("Downloading update ({percent}%)", { percent: Math.floor(state.downloadPercent) }),
+        )
+      : resolve(msg("Downloading update"));
   }
   if (state.status === "downloaded") {
-    return `Update ${state.downloadedVersion ?? state.availableVersion ?? "ready"} downloaded. Click to restart and install.`;
+    const version = state.downloadedVersion ?? state.availableVersion;
+    return version === null
+      ? resolve(msg("Update ready downloaded. Click to restart and install."))
+      : resolve(msg("Update {version} downloaded. Click to restart and install.", { version }));
   }
   if (state.status === "error") {
     if (state.errorContext === "install" && state.downloadedVersion) {
-      return `Install failed for ${state.downloadedVersion}. Click to retry.`;
+      return resolve(
+        msg("Install failed for {version}. Click to retry.", { version: state.downloadedVersion }),
+      );
     }
     if (state.downloadedVersion) {
-      return `Update ${state.downloadedVersion} downloaded. Click to restart and install.`;
+      return resolve(
+        msg("Update {version} downloaded. Click to restart and install.", {
+          version: state.downloadedVersion,
+        }),
+      );
     }
-    return state.message ?? "Update failed";
+    return state.message ?? resolve(msg("Update failed"));
   }
-  return "Up to date";
+  // The updater discards every release of the other track, so "up to date" would be false here.
+  const buildChannel = desktopUpdateChannelOf(state.currentVersion);
+  if (state.status === "up-to-date" && buildChannel !== state.channel) {
+    return resolve(
+      msg(
+        "This {build} build ignores {track} releases. Review the update track in Settings to finish the switch.",
+        {
+          build: channelSwitchLabel(buildChannel, resolve),
+          track: channelSwitchLabel(state.channel, resolve),
+        },
+      ),
+    );
+  }
+  return resolve(msg("Up to date"));
 }
 
 export function getDesktopUpdateInstallDialog(
   state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion" | "installWhenIdle">,
+  resolve: MessageResolver = m,
 ): {
   readonly message: string;
   readonly options: ConfirmDialogOptions & { readonly labels: ConfirmDialogLabels };
 } {
   const version = state.downloadedVersion ?? state.availableVersion;
-  const update = `update${version ? ` ${version}` : ""}`;
-  return state.installWhenIdle
-    ? {
-        message: `Restart T3 Code now to install ${update}?\n\nA restart is already queued until no agent is working or waiting for you. Restart now interrupts any running tasks.`,
-        options: {
-          labels: {
-            confirm: "Restart now",
-            cancel: "Keep waiting",
-            alternative: "Cancel queued restart",
-          },
+  if (state.installWhenIdle) {
+    return {
+      message: version
+        ? resolve(
+            msg(
+              "Restart T3 Code now to install update {version}?\n\nA restart is already queued until no agent is working or waiting for you. Restart now interrupts any running tasks.",
+              { version },
+            ),
+          )
+        : resolve(
+            msg(
+              "Restart T3 Code now to install update?\n\nA restart is already queued until no agent is working or waiting for you. Restart now interrupts any running tasks.",
+            ),
+          ),
+      options: {
+        labels: {
+          confirm: resolve(msg("Restart now")),
+          cancel: resolve(msg("Keep waiting")),
+          alternative: resolve(msg("Cancel queued restart")),
         },
-      }
-    : {
-        message: `Install ${update} and restart T3 Code?\n\nRestart now interrupts any running tasks. Restart when idle waits until no agent is working or waiting for you.`,
-        options: {
-          labels: { confirm: "Restart now", cancel: "Cancel", alternative: "Restart when idle" },
-        },
-      };
+      },
+    };
+  }
+  return {
+    message: version
+      ? resolve(
+          msg(
+            "Install update {version} and restart T3 Code?\n\nRestart now interrupts any running tasks. Restart when idle waits until no agent is working or waiting for you.",
+            { version },
+          ),
+        )
+      : resolve(
+          msg(
+            "Install update and restart T3 Code?\n\nRestart now interrupts any running tasks. Restart when idle waits until no agent is working or waiting for you.",
+          ),
+        ),
+    options: {
+      labels: {
+        confirm: resolve(msg("Restart now")),
+        cancel: resolve(msg("Cancel")),
+        alternative: resolve(msg("Restart when idle")),
+      },
+    },
+  };
 }
 
 /** Reads the choice against the dialog the user saw, which `state` built. */
@@ -201,18 +285,22 @@ export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
 export function getDesktopUpdateDisabledReason(
   state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
   managedDenial?: string,
+  resolve: MessageResolver = m,
 ): string | null {
   if (managedDenial !== undefined) return managedDenial;
   if (!state || (state.enabled && state.status !== "disabled")) return null;
-  return state.message?.trim() || "Automatic updates are not available in this build.";
+  return (
+    state.message?.trim() || resolve(msg("Automatic updates are not available in this build."))
+  );
 }
 
 export function getDesktopUpdateIdleTooltip(
   state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
   managedDenial?: string,
+  resolve: MessageResolver = m,
 ) {
-  const disabledReason = getDesktopUpdateDisabledReason(state, managedDenial);
+  const disabledReason = getDesktopUpdateDisabledReason(state, managedDenial, resolve);
   return disabledReason
-    ? { title: "Updates unavailable", detail: disabledReason }
-    : { title: "Check for updates", detail: null };
+    ? { title: resolve(msg("Updates unavailable")), detail: disabledReason }
+    : { title: resolve(msg("Check for updates")), detail: null };
 }
