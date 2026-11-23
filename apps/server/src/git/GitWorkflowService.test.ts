@@ -596,6 +596,7 @@ describe("GitWorkflowService", () => {
               execute: (input) => Effect.die(`spawned Git in ${input.cwd}`),
             }),
           ),
+          Layer.provideMerge(NodeServices.layer),
         ),
       ),
     ),

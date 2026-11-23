@@ -993,7 +993,10 @@ export function PullRequestSummaryTab({
             </PullRequestMetaRow>
           ) : null}
           {detail.deployments !== undefined && detail.deployments.length > 0 ? (
-            <MetaRow icon={<GlobeIcon className="size-3.5" />} label="Preview">
+            <PullRequestMetaRow
+              icon={<GlobeIcon className="size-3.5" />}
+              label={gt("Preview", { $context: "pull request preview deployments" })}
+            >
               <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                 {detail.deployments.map((deployment) => (
                   <Tooltip key={deployment.environment}>
@@ -1020,7 +1023,7 @@ export function PullRequestSummaryTab({
                   </Tooltip>
                 ))}
               </span>
-            </MetaRow>
+            </PullRequestMetaRow>
           ) : null}
         </div>
       </section>

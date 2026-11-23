@@ -519,7 +519,7 @@ function ProjectDetail({
       pickFolder: {
         environmentId: member.environmentId,
         currentPath: member.workspaceRoot,
-        label: `New folder for ${member.title}`,
+        label: gt("New folder for {title}", { title: member.title }),
         onPick: (path) => void setCheckoutFolder(member, path),
       },
     });
@@ -538,9 +538,9 @@ function ProjectDetail({
           variant="outline"
           disabled={!editableIds.has(member.environmentId)}
           onClick={() => pickCheckoutFolder(member)}
-          aria-label={`Change folder of checkout ${member.workspaceRoot}`}
+          aria-label={gt("Change folder of checkout {path}", { path: member.workspaceRoot })}
         >
-          Change…
+          <T context="button, picks a new folder for a checkout">Change…</T>
         </Button>
       )}
       {hasMultipleCheckouts ? (

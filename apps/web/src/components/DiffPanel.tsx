@@ -883,7 +883,10 @@ export default function DiffPanel({
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectNestedRepositories(routeThreadRef, repositories);
   };
-  const nestedRepositoriesLabel = nestedRepositorySelectionLabel(selectedNestedRepositories);
+  const nestedRepositoriesLabel = nestedRepositorySelectionLabel(
+    selectedNestedRepositories,
+    messages,
+  );
   const selectedTurnValue = selectedTurn ? `turn:${selectedTurn.runId}` : "";
   const selectedCommitValue = selectedCommitSha !== null ? `commit:${selectedCommitSha}` : "";
   const selectedScopeValue = toolCallSelection
@@ -1106,7 +1109,7 @@ export default function DiffPanel({
             <DropdownMenuTrigger
               render={<Button size="xs" variant="ghost-muted" />}
               className="min-w-0 max-w-48"
-              aria-label={`Repositories: ${nestedRepositoriesLabel}`}
+              aria-label={gt("Repositories: {label}", { label: nestedRepositoriesLabel })}
             >
               <MiddleTruncate value={nestedRepositoriesLabel} />
               <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
@@ -1123,7 +1126,7 @@ export default function DiffPanel({
                   )
                 }
               >
-                All repositories
+                <T>All repositories</T>
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               {nestedRepositoryMenuPaths.map((path) => (
