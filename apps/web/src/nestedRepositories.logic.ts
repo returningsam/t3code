@@ -1,4 +1,7 @@
 import type { VcsNestedRepositoryChanges } from "@t3tools/contracts";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "~/i18n/messages";
 
 const NESTED_REPOSITORY_ROW_LIMIT = 5;
 
@@ -72,8 +75,11 @@ export function toggleAllNestedRepositories(
   return selected.length === 0 ? settleNestedRepositoryPicks([], available) : [];
 }
 
-export function nestedRepositorySelectionLabel(selected: ReadonlyArray<string>): string {
-  if (selected.length === 0) return "All repositories";
+export function nestedRepositorySelectionLabel(
+  selected: ReadonlyArray<string>,
+  resolve: MessageResolver = m,
+): string {
+  if (selected.length === 0) return resolve(msg("All repositories"));
   if (selected.length === 1) return selected[0]!;
-  return `${selected.length} repositories`;
+  return resolve(msg("{count, plural, other {{count} repositories}}", { count: selected.length }));
 }

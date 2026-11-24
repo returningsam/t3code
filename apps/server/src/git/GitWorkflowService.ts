@@ -508,8 +508,10 @@ export const make = Effect.gen(function* () {
         .invalidateStatus(cwd)
         .pipe(Effect.andThen(Cache.invalidate(nestedChangeTotalsCache, cwd)));
     }),
-    headPath: Effect.fn("GitWorkflowService.headPath")(function (cwd) {
-      return git
+    headPath: Effect.fn("GitWorkflowService.headPath")(function* (cwd) {
+      // Clients keep watching threads whose worktree was removed; spawning there fails noisily.
+      if (!(yield* fileSystem.exists(cwd).pipe(Effect.orElseSucceed(() => true)))) return null;
+      return yield* git
         .execute({
           operation: "GitWorkflowService.headPath",
           cwd,
