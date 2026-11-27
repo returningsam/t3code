@@ -230,7 +230,7 @@ export function reduceDesktopUpdateStateOnDownloadLost(
 ): DesktopUpdateState {
   if (state.downloadedVersion === null) return state;
   return {
-    ...withoutTrackMismatch(state),
+    ...withoutTrackMismatch(withoutInstallWhenIdle(state)),
     status: "available",
     availableVersion: state.downloadedVersion,
     downloadedVersion: null,

@@ -431,7 +431,7 @@ describe("applyReviewDiffMetadata", () => {
 
   it("names how many changed repositories a folder's preview leaves out", () => {
     const diff = "diff --git a/main/a.ts b/main/a.ts\n--- a/main/a.ts\n+++ b/main/a.ts";
-    const source: ReviewDiffPreviewSource = {
+    const source = {
       id: "branch-range",
       kind: "branch-range",
       title: "Changes",
@@ -441,7 +441,7 @@ describe("applyReviewDiffMetadata", () => {
       diffHash: "hash",
       truncated: false,
       nestedRepositories: { shown: 32, changed: 75 },
-    };
+    } satisfies ReviewDiffPreviewSource;
     const parsed = buildReviewParsedDiff(diff, "folder");
     const notice = (truncated: boolean) => {
       const result = applyReviewDiffMetadata(parsed, { truncated, source });

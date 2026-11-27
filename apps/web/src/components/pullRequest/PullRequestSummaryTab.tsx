@@ -1050,28 +1050,26 @@ export const PullRequestSummaryTab = memo(function PullRequestSummaryTab({
             >
               <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                 {detail.deployments.map((deployment) => (
-                  <Tooltip key={deployment.environment}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="flex min-w-0 cursor-pointer items-center gap-1.5 hover:underline"
-                          onClick={(event) =>
-                            openExternal(deployment.url, msg("Unable to open the preview"), event)
-                          }
-                        />
-                      }
-                    >
-                      <PullRequestCheckStatusIcon status={deployment.status} still />
-                      <span className="truncate">{deployment.environment}</span>
-                      <span className="sr-only">
-                        , {resolve(DEPLOYMENT_STATUS_LABEL[deployment.status])}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipPopup side="bottom">
-                      {resolve(DEPLOYMENT_STATUS_LABEL[deployment.status])} · {deployment.url}
-                    </TooltipPopup>
-                  </Tooltip>
+                  <SharedTooltipTrigger
+                    key={deployment.environment}
+                    render={
+                      <button
+                        type="button"
+                        className="flex min-w-0 cursor-pointer items-center gap-1.5 hover:underline"
+                        onClick={(event) =>
+                          openExternal(deployment.url, msg("Unable to open the preview"), event)
+                        }
+                      />
+                    }
+                    label={`${resolve(DEPLOYMENT_STATUS_LABEL[deployment.status])} · ${deployment.url}`}
+                    side="bottom"
+                  >
+                    <PullRequestCheckStatusIcon status={deployment.status} still />
+                    <span className="truncate">{deployment.environment}</span>
+                    <span className="sr-only">
+                      , {resolve(DEPLOYMENT_STATUS_LABEL[deployment.status])}
+                    </span>
+                  </SharedTooltipTrigger>
                 ))}
               </span>
             </PullRequestMetaRow>

@@ -21,7 +21,6 @@ import {
   type RuntimeMode,
   type ScheduledTaskId,
   type GitCommandError,
-  type GitManagerServiceError,
   TaskFolderError,
   TextGenerationError,
   ThreadId,

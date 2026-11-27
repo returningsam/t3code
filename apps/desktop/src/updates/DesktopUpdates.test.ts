@@ -772,6 +772,62 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("a queued restart whose deleted download fails again is no longer queued", () =>
+    Effect.gen(function* () {
+      const downloadedFile = "/cache/pending/T3-Code-1.2.4-arm64.zip";
+      const installed = yield* Deferred.make<void>();
+      let downloadFails = true;
+      const harness = makeHarness({
+        agentsIdle: false,
+        downloadUpdate: Effect.suspend(() =>
+          downloadFails
+            ? Effect.fail(
+                new ElectronUpdater.ElectronUpdaterDownloadUpdateError({
+                  channel: "latest",
+                  cause: new Error("net::ERR_CONNECTION_RESET"),
+                }),
+              )
+            : Effect.sync(() => {
+                harness.deletedFiles.delete(downloadedFile);
+                harness.emit("update-downloaded", { version: "1.2.4", downloadedFile });
+              }),
+        ),
+        quitAndInstall: Deferred.succeed(installed, undefined).pipe(Effect.asVoid),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4", downloadedFile });
+          yield* flushCallbacks;
+          const { changes } = yield* updates.subscribe;
+          const failed = yield* changes.pipe(
+            Stream.filter((state) => state.errorContext === "download"),
+            Stream.runHead,
+            Effect.forkScoped,
+          );
+
+          harness.deletedFiles.add(downloadedFile);
+          assert.isTrue((yield* updates.setInstallWhenIdle(true)).installWhenIdle);
+          yield* harness.setAgentsIdle(true);
+          const afterFailure = yield* Fiber.join(failed);
+          assert.isTrue(Option.isSome(afterFailure));
+          assert.isUndefined(Option.getOrThrow(afterFailure).installWhenIdle);
+          assert.equal(harness.quitAndInstalls(), 0);
+
+          // A queued install that fetches the lost file again still waits for it, then installs.
+          downloadFails = false;
+          yield* updates.download;
+          harness.deletedFiles.add(downloadedFile);
+          yield* updates.setInstallWhenIdle(true);
+          yield* Deferred.await(installed);
+          assert.equal(harness.quitAndInstalls(), 1);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
   it.effect("restores download state and permits retry after interruption", () =>
     Effect.gen(function* () {
       const actionStarted = yield* Deferred.make<void>();

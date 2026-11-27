@@ -234,7 +234,7 @@ export function PullRequestDeploymentRows(props: Pick<RowProps, "pr">) {
             value={label}
             compact
             accessibilityLabel={`${deployment.environment} deployment, ${label}`}
-            onPress={() => void Linking.openURL(deployment.url)}
+            onPress={() => void tryOpenExternalUrl(deployment.url, "pull-request")}
           />
         );
       })}

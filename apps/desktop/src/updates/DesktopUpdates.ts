@@ -1058,6 +1058,9 @@ export const make = Effect.gen(function* () {
           state: yield* Ref.get(updateStateRef),
         };
       }
+      if (queued && (yield* Ref.get(installWhenIdleRequestedRef))) {
+        yield* updateState((state) => reduceDesktopUpdateStateOnInstallWhenIdle(state, true));
+      }
       if (expectedVersion !== undefined) {
         installVersion = (yield* Ref.get(updateStateRef)).downloadedVersion ?? expectedVersion;
       }

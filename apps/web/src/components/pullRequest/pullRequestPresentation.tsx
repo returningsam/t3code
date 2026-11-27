@@ -320,16 +320,16 @@ export function PullRequestChecksStateGlyph({ state }: { state: PullRequestCheck
   const resolve = useMessages();
   const presentation = pullRequestChecksStatePresentation(state, resolve);
   return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-        <presentation.Icon
-          role="img"
-          aria-label={presentation.label}
-          className={cn("size-3.5", presentation.toneClassName)}
-        />
-      </TooltipTrigger>
-      <TooltipPopup>{presentation.label}</TooltipPopup>
-    </Tooltip>
+    <SharedTooltipTrigger
+      render={<span className="inline-flex shrink-0" />}
+      label={presentation.label}
+    >
+      <presentation.Icon
+        role="img"
+        aria-label={presentation.label}
+        className={cn("size-3.5", presentation.toneClassName)}
+      />
+    </SharedTooltipTrigger>
   );
 }
 

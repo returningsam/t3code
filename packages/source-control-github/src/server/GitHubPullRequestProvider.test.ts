@@ -570,6 +570,7 @@ it.effect("discovers workflow approval for a same-repository bot pull request", 
         revalidateChecks: (_input, read) => read,
         getPullRequestDetail: () => Effect.succeed({ ...openDetail, isCrossRepository: false }),
         listUnfinishedWorkflowRuns: () => Effect.succeed([]),
+        listCommitDeployments: () => Effect.succeed([]),
         listWorkflowRunsRequiringApproval: () =>
           Effect.succeed([
             {
@@ -662,6 +663,16 @@ it.effect("adds the head's deployments to the detail, and leaves them off when u
           listCommitDeployments: (input) =>
             input.sha === "abc123" ? deploymentsRead : Effect.die("read the wrong commit"),
           listUnfinishedWorkflowRuns: () => Effect.succeed([]),
+          listWorkflowRunsRequiringApproval: () => Effect.succeed([]),
+          getViewerAccess: () =>
+            Effect.succeed({
+              canWrite: true,
+              canTriage: true,
+              canUpdate: true,
+              didAuthor: false,
+              mergeCapabilities: { merge: true, squash: true, rebase: true },
+              autoMergeAllowed: true,
+            }),
         }),
       ),
     );
