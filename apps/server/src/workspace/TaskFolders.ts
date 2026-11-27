@@ -107,6 +107,8 @@ export class TaskFolders extends Context.Service<
     readonly create: (input: {
       readonly plan: TaskFolderPlan;
       readonly branch: string;
+      /** T3 generated `branch`, so a name the project folder already has moves to a free one too. */
+      readonly generatedBranchName?: boolean;
       /** Where the project folder's branch starts; unused when it is not a repository. */
       readonly projectStart: { readonly refName: string; readonly baseRefName: string };
       /**
@@ -869,7 +871,12 @@ const make = Effect.gen(function* () {
     });
     if (deleteBranch !== undefined) {
       yield* git
-        .deleteLocalBranch({ cwd: checkout.repositoryPath, refName: deleteBranch, force: true })
+        .deleteLocalBranch({
+          cwd: checkout.repositoryPath,
+          refName: deleteBranch,
+          force: true,
+          withWtTrackingBranch: true,
+        })
         .pipe(Effect.ignoreCause({ log: true }));
     }
   });
@@ -1107,10 +1114,12 @@ const make = Effect.gen(function* () {
         )
           ? flattenTemporaryWorktreeBranchName(input.branch)
           : input.branch;
-      // A name the project folder already has is Git's to refuse, as for a single worktree.
-      const branch = projectNames.some((existing) => collides(existing, requested))
-        ? requested
-        : yield* freeBranchName("create", requested, [...names, projectNames]);
+      // A chosen name the project folder already has is Git's to refuse, as for a single worktree.
+      const branch =
+        input.generatedBranchName !== true &&
+        projectNames.some((existing) => collides(existing, requested))
+          ? requested
+          : yield* freeBranchName("create", requested, [...names, projectNames]);
       const root = yield* allocateRoot(taskPlan, branch);
       const empty: TaskFolder = {
         root,
@@ -1353,7 +1362,14 @@ const make = Effect.gen(function* () {
               Effect.forEach(
                 branchMadeIn,
                 (cwd) =>
-                  git.deleteLocalBranch({ cwd, refName: branch, force: true }).pipe(Effect.ignore),
+                  git
+                    .deleteLocalBranch({
+                      cwd,
+                      refName: branch,
+                      force: true,
+                      withWtTrackingBranch: true,
+                    })
+                    .pipe(Effect.ignore),
                 { concurrency: REPOSITORY_CONCURRENCY, discard: true },
               ),
             ),

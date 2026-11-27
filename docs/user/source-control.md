@@ -51,7 +51,7 @@ one. To review several, pick them from the repository menu beside the Diff pane'
 which lists every changed checkout, including those past the first 32.
 
 On mobile, **Review changes** in a project folder that is not a repository always lists the
-uncommitted edits of every repository and checkout below it this way.
+uncommitted edits of the repositories and checkouts below it this way, up to the same 32.
 
 ## Connect an account
 

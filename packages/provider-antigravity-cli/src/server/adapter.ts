@@ -851,8 +851,10 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   }),
               ),
             ),
-        startTurn: (turnInput) =>
-          permit
+        startTurn: (turnInput) => {
+          // Any failure before the send leaves the turn's staged context unsent.
+          let promptSent = false;
+          return permit
             .withPermits(1)(
               Effect.gen(function* () {
                 if (closed) return yield* protocolError("The Antigravity CLI session is closed");
@@ -934,6 +936,7 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                   lastRunOrdinal: turnInput.runOrdinal,
                 });
                 yield* updateSession("running");
+                promptSent = true;
                 yield* process.agy.send(text);
               }),
             )
@@ -946,9 +949,11 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
                     providerThreadId: turnInput.providerThread.id,
                     runId: turnInput.runId,
                     cause,
+                    ...(promptSent ? {} : { refusedBeforePrompt: true }),
                   }),
               ),
-            ),
+            );
+        },
         steerTurn: (args) =>
           Effect.fail(
             new ProviderAdapter.ProviderAdapterSteerRunUnsupportedError({
@@ -1002,7 +1007,6 @@ export const makeAntigravityCliAdapterV2 = Effect.fn("makeAntigravityCliAdapterV
         readThreadSnapshot: (args) =>
           Effect.succeed({
             providerThread: args.providerThread,
-            providerTurns: [],
             messages: [],
             runtimeRequests: [],
           }),

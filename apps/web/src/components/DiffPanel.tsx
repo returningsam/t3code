@@ -396,9 +396,15 @@ export default function DiffPanel({
   const pickedNestedRepositories = useDiffPanelStore((state) =>
     selectThreadNestedRepositories(state.nestedRepositoriesByThreadKey, routeThreadRef),
   );
+  // A plain folder may still turn out to track repositories, which the Git scopes then read.
+  const folderLookupPending =
+    !threadFolderIsRepo &&
+    gitRepository === null &&
+    ((taskFolderQuery.isPending && taskFolderQuery.data === null) ||
+      (projectFoldersQuery.isPending && projectFoldersQuery.data === null));
   // Only a review of the thread's own folder covers its nested repositories.
   const nestedRepositoryPaths =
-    gitRepository === null
+    gitRepository === null && !folderLookupPending
       ? gitStatusQuery.data?.nestedRepositoryChanges?.map((repository) => repository.path)
       : undefined;
   // The review covers every repository until status lists the changed ones to pick from.
@@ -475,7 +481,7 @@ export default function DiffPanel({
     { enabled: (isGitRepo || hasRepositoryChanges) && selectedTurn !== undefined },
   );
   const branchDiffPreviewInput =
-    canReadFiles && isGitSelection && activeThread && gitCwd
+    canReadFiles && isGitSelection && activeThread && gitCwd && !folderLookupPending
       ? {
           cwd: gitCwd,
           ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),

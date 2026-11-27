@@ -893,6 +893,7 @@ const make = Effect.gen(function* () {
                 .create({
                   plan: taskPlan,
                   branch: branch!,
+                  ...(generatedBranch === null ? {} : { generatedBranchName: true }),
                   projectStart: { refName: startRef, baseRefName },
                   baseBranch: input.workspaceStrategy.baseRef,
                   startFromOrigin: input.workspaceStrategy.startFromOrigin === true,

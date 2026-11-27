@@ -123,6 +123,7 @@ const handoffFrom = <A, E>(
           Effect.gen(function* () {
             const driver = yield* GitVcsDriver.GitVcsDriver;
             return Layer.mock(GitWorkflowService.GitWorkflowService)({
+              repositoryRoot: () => Effect.succeed(state.workspaceRoot),
               localStatus: () =>
                 Effect.succeed({
                   isRepo: true,

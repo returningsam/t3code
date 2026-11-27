@@ -82,6 +82,7 @@ const create = Effect.fnUntraced(function* (
   branch: string,
   repositories?: ReadonlyArray<{ readonly path: string }>,
   baseBranch?: string,
+  generatedBranchName?: boolean,
 ) {
   const taskFolders = yield* TaskFolders.TaskFolders;
   const plan = yield* taskFolders.plan({ projectId, repositories });
@@ -89,6 +90,7 @@ const create = Effect.fnUntraced(function* (
   return yield* taskFolders.create({
     plan: plan!,
     branch,
+    ...(generatedBranchName === undefined ? {} : { generatedBranchName }),
     projectStart: { refName: "main", baseRefName: "main" },
     baseBranch,
     startFromOrigin: false,
@@ -860,6 +862,29 @@ it.live("gives every repository one branch name when one of them already has it"
         yield* run(path.join(taskFolder.root, "web"), "symbolic-ref", "--short", "HEAD"),
         "fix-login-2",
       );
+    }),
+  ),
+);
+
+it.live("moves a generated name the project's own repository already has to a free one", () =>
+  withState((state) =>
+    Effect.gen(function* () {
+      const { run, repository } = yield* fixture;
+      const ctx = yield* repository("x/ctx");
+      const app = yield* repository("x/app");
+      yield* run(ctx, "branch", "wt/fix-login");
+      state.workspaceRoot = ctx;
+      state.trackedFolders = tracked(app);
+
+      const { taskFolder, branch } = yield* create("wt/fix-login", undefined, undefined, true);
+
+      assert.equal(branch, "wt/fix-login-2");
+      for (const checkout of [
+        taskFolder.projectPath,
+        ...taskFolder.repositories.map((repositoryWorktree) => repositoryWorktree.worktreePath),
+      ]) {
+        assert.equal(yield* run(checkout, "symbolic-ref", "--short", "HEAD"), "wt/fix-login-2");
+      }
     }),
   ),
 );
