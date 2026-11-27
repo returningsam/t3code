@@ -25,6 +25,8 @@ change, or **Stop**. Attachments reach agy as saved file paths that the agent op
 tools. Plan mode and rewinding a conversation are unavailable, agents on this provider cannot
 use T3 Code's MCP tools, and this provider does not write commit messages, pull request text,
 or thread titles.
+In a [project with several folders](./multi-repo-projects.md), agy works only in the thread's
+working folder.
 
 ## Skills
 

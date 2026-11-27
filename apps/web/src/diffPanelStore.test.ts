@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import { EnvironmentId, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -158,5 +158,24 @@ describe("diffPanelStore", () => {
     store.selectNestedRepositories(THREAD_REF, ["main"]);
     store.removeThread(THREAD_REF);
     expect(THREAD_KEY in useDiffPanelStore.getState().nestedRepositoriesByThreadKey).toBe(false);
+  });
+
+  it("keeps the repository filter across turns and drops it for a requested file", () => {
+    const ref = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
+    const selection = () => useDiffPanelStore.getState().byThreadKey[scopedThreadKey(ref)];
+    const store = useDiffPanelStore.getState();
+    store.selectTurnRepository(ref, RunId.make("run-1"), "/work/api");
+    store.selectTurn(ref, RunId.make("run-2"));
+    expect(selection()).toMatchObject({ turnId: "run-2", repository: "/work/api" });
+    store.selectTurn(ref, RunId.make("run-2"), "web/src/index.ts");
+    expect(selection()).toEqual({
+      kind: "turn",
+      turnId: "run-2",
+      filePath: "web/src/index.ts",
+      revealRequestId: 2,
+    });
+    store.selectTurnRepository(ref, RunId.make("run-2"), "/work/api");
+    store.selectTurnRepository(ref, RunId.make("run-2"), null);
+    expect(selection()).not.toHaveProperty("repository");
   });
 });

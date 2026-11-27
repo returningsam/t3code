@@ -673,6 +673,7 @@ describe("AntigravityCliAdapterV2", () => {
         modelSelection: selection("opus-5.5"),
       }).pipe(Effect.flip);
       assert.equal(error._tag, "ProviderAdapterTurnStartError");
+      assert.isTrue(error._tag === "ProviderAdapterTurnStartError" && error.refusedBeforePrompt);
       yield* takeUntil(
         (event) =>
           event.type === "provider_session.updated" && event.providerSession.status === "stopped",
@@ -704,6 +705,9 @@ describe("AntigravityCliAdapterV2", () => {
         planMode: true,
       }).pipe(Effect.flip);
       assert.include(String(turnError.cause), "does not support Plan mode");
+      assert.isTrue(
+        turnError._tag === "ProviderAdapterTurnStartError" && turnError.refusedBeforePrompt,
+      );
       assert.deepEqual(fake.stdin, [[]]);
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
